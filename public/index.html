@@ -1,0 +1,1337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teaching Ledger</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700;800&family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --ink:#241A28;
+    --ink-soft:#6E5C74;
+    --paper:#F3ECE7;
+    --surface:rgba(255,255,255,0.66);
+    --surface-solid:#FFFFFF;
+    --surface-2:rgba(255,255,255,0.85);
+    --line:rgba(36,26,40,0.13);
+    --accent:#7C3FA0;
+    --accent-strong:#5B2655;
+    --accent-glow:rgba(124,63,160,0.30);
+    --accent-ink:#F1E6F3;
+    --rose:#C06B3F;
+    --rose-glow:rgba(192,107,63,0.24);
+    --rose-ink:#F8E9DE;
+    --danger:#B4483A;
+    --danger-ink:#FBEDEA;
+    --on-gradient:#FFFFFF;
+    --org-mindstretcher:#5A6FC4;
+    --org-ottodot:#C97A46;
+    --org-mastermaths:#3F9E8F;
+    --org-bluetree:#3F8FB0;
+    --org-primeplus:#B08A3A;
+    --shadow: 0 1px 2px rgba(36,26,40,0.07), 0 14px 34px rgba(91,38,85,0.12);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ink:#EFE8EC;
+      --ink-soft:#A99BAE;
+      --paper:#0F0A13;
+      --surface:rgba(42,30,48,0.55);
+      --surface-solid:#1E1621;
+      --surface-2:rgba(52,38,59,0.6);
+      --line:rgba(255,255,255,0.09);
+      --accent:#B679DE;
+      --accent-strong:#8E4FB8;
+      --accent-glow:rgba(182,121,222,0.35);
+      --accent-ink:#2C1B33;
+      --rose:#E9A87F;
+      --rose-glow:rgba(233,168,127,0.25);
+      --rose-ink:#3A2216;
+      --danger:#E0796D;
+      --danger-ink:#3A1714;
+      --shadow: 0 1px 2px rgba(0,0,0,0.5), 0 16px 44px rgba(140,80,180,0.22);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ink:#EFE8EC;
+    --ink-soft:#A99BAE;
+    --paper:#0F0A13;
+    --surface:rgba(42,30,48,0.55);
+    --surface-solid:#1E1621;
+    --surface-2:rgba(52,38,59,0.6);
+    --line:rgba(255,255,255,0.09);
+    --accent:#B679DE;
+    --accent-strong:#8E4FB8;
+    --accent-glow:rgba(182,121,222,0.35);
+    --accent-ink:#2C1B33;
+    --rose:#E9A87F;
+    --rose-glow:rgba(233,168,127,0.25);
+    --rose-ink:#3A2216;
+    --danger:#E0796D;
+    --danger-ink:#3A1714;
+    --shadow: 0 1px 2px rgba(0,0,0,0.5), 0 16px 44px rgba(140,80,180,0.22);
+  }
+
+  *{ box-sizing:border-box; }
+  html{ color-scheme:light dark; }
+  body{
+    margin:0;
+    background:
+      radial-gradient(620px circle at 12% -8%, var(--accent-glow), transparent 60%),
+      radial-gradient(520px circle at 108% 6%, var(--rose-glow), transparent 55%),
+      radial-gradient(700px circle at 50% 120%, var(--accent-glow), transparent 60%),
+      var(--paper);
+    background-attachment:fixed;
+    color:var(--ink);
+    font-family:'Manrope', ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+  }
+  h1,h2,h3{ text-wrap:balance; font-weight:700; }
+  .display{
+    font-family:'Unbounded', 'Manrope', sans-serif;
+    font-weight:700;
+    letter-spacing:-0.01em;
+  }
+  .mono{
+    font-family:'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  button{ font-family:inherit; }
+  button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible{
+    outline:2px solid var(--accent);
+    outline-offset:2px;
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{ animation-duration:0.01ms !important; transition-duration:0.01ms !important; }
+  }
+
+  /* ---- passcode gate ---- */
+  #gate{
+    min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .gate-card{
+    width:100%; max-width:320px;
+    background:var(--surface); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+    border:1px solid var(--line); border-radius:20px; padding:28px 24px; box-shadow:var(--shadow);
+    text-align:center;
+  }
+  .gate-card h1{
+    font-family:'Unbounded', sans-serif; font-size:18px; margin:0 0 6px;
+    background:linear-gradient(120deg, var(--accent-strong), var(--accent) 60%, var(--rose));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .gate-card p{ font-size:12.5px; color:var(--ink-soft); margin:0 0 18px; }
+  .gate-card input{
+    width:100%; font-family:'IBM Plex Mono', monospace; font-size:20px; letter-spacing:0.3em; text-align:center;
+    padding:13px; border-radius:12px; border:1px solid var(--line); background:var(--surface-2); color:var(--ink);
+    margin-bottom:14px;
+  }
+  .gate-card button{
+    width:100%; background:linear-gradient(135deg, var(--accent-strong), var(--accent));
+    color:var(--on-gradient); border:none; border-radius:999px; padding:13px; font-size:14px; font-weight:700; cursor:pointer;
+    box-shadow:0 10px 28px var(--accent-glow);
+  }
+  .gate-error{ color:var(--danger); font-size:12px; margin-top:10px; }
+
+  #app{
+    max-width:560px;
+    margin:0 auto;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+  }
+  header.topbar{
+    position:sticky; top:10px; z-index:5;
+    margin:10px 14px 0;
+    background:var(--surface);
+    backdrop-filter:blur(20px);
+    -webkit-backdrop-filter:blur(20px);
+    border:1px solid var(--line);
+    border-radius:20px;
+    padding:14px 18px;
+    box-shadow:var(--shadow);
+  }
+  header.topbar .brandrow{ display:flex; align-items:center; justify-content:space-between; }
+  header.topbar h1{
+    font-family:'Unbounded', sans-serif;
+    font-weight:700;
+    font-size:16.5px; margin:0;
+    letter-spacing:-0.01em;
+    background:linear-gradient(120deg, var(--accent-strong), var(--accent) 60%, var(--rose));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  header.topbar .section-label{
+    margin-top:7px;
+    font-size:10.5px;
+    color:var(--ink-soft);
+    text-transform:uppercase;
+    letter-spacing:0.14em;
+    font-weight:600;
+  }
+  .theme-toggle{
+    width:34px; height:34px; border-radius:50%; border:1px solid var(--line);
+    background:var(--surface-2); color:var(--accent); font-size:15px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; flex:0 0 auto;
+  }
+
+  main{
+    flex:1;
+    padding:20px 14px 118px;
+    display:flex;
+    flex-direction:column;
+    gap:24px;
+  }
+
+  /* ---- Dashboard ---- */
+  .period-scroller{
+    display:flex;
+    gap:12px;
+    overflow-x:auto;
+    padding-bottom:4px;
+    margin:0 -14px;
+    padding-left:14px;
+    padding-right:14px;
+    scroll-snap-type:x proximity;
+  }
+  .period-card{
+    scroll-snap-align:start;
+    flex:0 0 auto;
+    width:208px;
+    background:var(--surface);
+    backdrop-filter:blur(20px);
+    -webkit-backdrop-filter:blur(20px);
+    border:1px solid var(--line);
+    border-radius:20px;
+    padding:17px 18px;
+    box-shadow:var(--shadow);
+  }
+  .period-card .p-label{
+    font-size:10.5px;
+    text-transform:uppercase;
+    letter-spacing:0.12em;
+    color:var(--ink-soft);
+    margin-bottom:10px;
+    font-weight:600;
+  }
+  .period-card .p-combined{
+    font-size:25px;
+    margin-bottom:13px;
+    line-height:1.05;
+  }
+  .p-row{
+    display:flex; justify-content:space-between; align-items:baseline;
+    font-size:12.5px; padding:5px 0;
+    border-top:1px solid var(--line);
+  }
+  .p-row:first-of-type{ border-top:none; padding-top:0; }
+  .p-row .k{ display:flex; align-items:center; gap:6px; color:var(--ink-soft); font-weight:500; }
+  .dot{ width:7px; height:7px; border-radius:50%; display:inline-block; flex:0 0 auto; }
+  .dot.earned{ background:var(--accent); box-shadow:0 0 8px var(--accent-glow); }
+  .dot.projected{ background:var(--rose); box-shadow:0 0 8px var(--rose-glow); }
+
+  .card{
+    background:var(--surface);
+    backdrop-filter:blur(20px);
+    -webkit-backdrop-filter:blur(20px);
+    border:1px solid var(--line);
+    border-radius:20px;
+    padding:19px;
+    box-shadow:var(--shadow);
+  }
+  .card h2{ font-size:14.5px; margin:0 0 14px; letter-spacing:0.01em; font-family:'Manrope'; font-weight:700; }
+
+  .seg{
+    display:flex; gap:5px; background:var(--paper); padding:4px; border-radius:999px; border:1px solid var(--line);
+  }
+  .seg button{
+    flex:1; border:none; background:transparent; padding:8px 0; font-size:12.5px; font-weight:700;
+    color:var(--ink-soft); border-radius:999px; cursor:pointer;
+  }
+  .seg button.active{ background:linear-gradient(135deg, var(--accent-strong), var(--accent)); color:var(--on-gradient); }
+
+  .breakdown-row{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:11px 0; border-bottom:1px solid var(--line);
+  }
+  .breakdown-row:last-child{ border-bottom:none; }
+  .breakdown-row .org{ display:flex; align-items:center; gap:9px; font-size:13.5px; font-weight:600; }
+  .breakdown-row .amounts{ text-align:right; font-size:13px; }
+  .breakdown-row .amounts .combined{ font-weight:700; }
+  .breakdown-row .amounts .split{ color:var(--ink-soft); font-size:11px; }
+  .empty-note{ color:var(--ink-soft); font-size:13px; padding:8px 0; }
+
+  /* ---- quick add ---- */
+  .quickgrid{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .quickbtn{
+    display:flex; flex-direction:column; align-items:center; gap:9px;
+    background:var(--surface-2); border:1px solid var(--line); border-radius:16px;
+    padding:16px 6px; cursor:pointer; font-size:12px; font-weight:700; color:var(--ink);
+  }
+  .quickbtn .swatch{ width:20px; height:20px; border-radius:7px; box-shadow:0 0 10px currentColor; }
+  .quickbtn:active{ transform:translateY(1px); }
+
+  /* ---- forms ---- */
+  .field{ display:flex; flex-direction:column; gap:6px; margin-bottom:14px; }
+  .field label{ font-size:10.5px; text-transform:uppercase; letter-spacing:0.09em; color:var(--ink-soft); font-weight:700; }
+  .field input, .field select{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:14px;
+    padding:11px 13px;
+    border-radius:12px;
+    border:1px solid var(--line);
+    background:var(--surface-2);
+    color:var(--ink);
+  }
+  .choice-row{ display:flex; gap:8px; flex-wrap:wrap; }
+  .choice-row button{
+    flex:1; min-width:90px;
+    border:1px solid var(--line); background:var(--surface-2); color:var(--ink);
+    padding:11px 8px; border-radius:12px; font-size:13px; font-weight:700; cursor:pointer;
+  }
+  .choice-row button.active{ background:linear-gradient(135deg, var(--accent-strong), var(--accent)); border-color:transparent; color:var(--on-gradient); }
+  .toggle-row{ display:flex; align-items:center; justify-content:space-between; padding:4px 0 16px; }
+  .toggle-row .t-label{ font-size:13.5px; font-weight:600; }
+  .switch{ position:relative; width:42px; height:24px; border-radius:12px; background:var(--line); border:none; cursor:pointer; }
+  .switch.on{ background:linear-gradient(135deg, var(--accent-strong), var(--accent)); }
+  .switch .knob{ position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:50%; background:var(--surface-solid); transition:transform .15s ease; }
+  .switch.on .knob{ transform:translateX(18px); }
+
+  .rate-preview{
+    background:var(--accent-ink); border:1px solid var(--line); color:var(--accent);
+    border-radius:14px; padding:12px 15px; font-size:13px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; font-weight:600;
+  }
+  .save-btn{
+    width:100%; background:linear-gradient(135deg, var(--accent-strong), var(--accent));
+    color:var(--on-gradient); border:none; border-radius:999px;
+    padding:15px; font-size:14.5px; font-weight:700; cursor:pointer;
+    box-shadow:0 10px 28px var(--accent-glow);
+  }
+  .save-btn:active{ transform:translateY(1px); }
+  .back-link{ background:none; border:none; color:var(--ink-soft); font-size:13px; cursor:pointer; padding:0 0 6px; display:flex; align-items:center; gap:4px; font-weight:600; }
+
+  .comingsoon{
+    border:1px dashed var(--line); border-radius:16px; padding:15px; color:var(--ink-soft); font-size:13px; text-align:center;
+  }
+
+  /* ---- history/trash ---- */
+  .filter-row{ display:flex; gap:8px; overflow-x:auto; padding-bottom:2px; }
+  .chip{
+    flex:0 0 auto; border:1px solid var(--line); background:var(--surface-2); color:var(--ink-soft);
+    padding:7px 13px; border-radius:999px; font-size:12px; font-weight:700; cursor:pointer; display:flex; align-items:center; gap:6px;
+  }
+  .chip.active{ background:linear-gradient(135deg, var(--accent-strong), var(--accent)); color:var(--on-gradient); border-color:transparent; }
+
+  .class-list{ display:flex; flex-direction:column; gap:8px; }
+  .class-item{
+    background:var(--surface); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
+    border:1px solid var(--line); border-radius:16px; padding:13px 15px;
+    display:flex; justify-content:space-between; align-items:center; gap:10px;
+    box-shadow:var(--shadow);
+  }
+  .class-item .left{ display:flex; flex-direction:column; gap:3px; min-width:0; }
+  .class-item .top-line{ display:flex; align-items:center; gap:7px; font-size:13.5px; font-weight:700; }
+  .class-item .sub-line{ font-size:11.5px; color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .class-item .right{ display:flex; align-items:center; gap:10px; flex:0 0 auto; }
+  .class-item .income{ font-size:14px; font-weight:700; }
+  .class-item .income.future{ color:var(--rose); }
+  .class-item .income.past{ color:var(--accent); }
+  .icon-btn{
+    border:none; background:transparent; color:var(--ink-soft); cursor:pointer; font-size:16px; padding:4px 6px; border-radius:8px;
+  }
+  .icon-btn:hover{ background:var(--surface-2); }
+  .icon-btn.danger:hover{ background:var(--danger-ink); color:var(--danger); }
+  .tag-badge{
+    font-size:9.5px; text-transform:uppercase; letter-spacing:0.04em; font-weight:700;
+    background:var(--surface-2); color:var(--ink-soft); border-radius:6px; padding:2px 6px;
+  }
+
+  .settings-row{ display:flex; align-items:center; justify-content:space-between; padding:11px 0; border-bottom:1px solid var(--line); }
+  .settings-row:last-of-type{ border-bottom:none; }
+  .settings-label{ display:flex; align-items:center; gap:9px; font-size:13.5px; font-weight:600; }
+  .color-input{
+    -webkit-appearance:none; appearance:none; width:44px; height:32px; padding:2px;
+    border:1px solid var(--line); border-radius:9px; background:var(--surface-2); cursor:pointer;
+  }
+  .color-input::-webkit-color-swatch-wrapper{ padding:0; }
+  .color-input::-webkit-color-swatch{ border:none; border-radius:6px; }
+
+  .restore-btn{
+    border:1px solid transparent; color:var(--on-gradient);
+    background:linear-gradient(135deg, var(--accent-strong), var(--accent));
+    border-radius:999px; padding:7px 12px; font-size:12px; font-weight:700; cursor:pointer;
+  }
+
+  /* ---- calendar ---- */
+  .cal-nav{ display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; }
+  .cal-nav .icon-btn{ font-size:18px; }
+  .cal-month{ font-size:15px; }
+  .cal-summary{ font-size:12px; color:var(--ink-soft); margin-bottom:12px; }
+  .cal-summary .mono{ color:var(--ink); font-weight:700; }
+  .cal-grid{ display:flex; flex-direction:column; gap:5px; }
+  .cal-week{ display:grid; grid-template-columns:repeat(7,1fr); gap:5px; }
+  .cal-week.cal-head{ margin-bottom:2px; }
+  .cal-wd{ text-align:center; font-size:10px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.05em; font-weight:700; }
+  .cal-cell{
+    min-height:60px; background:var(--surface-2); border:1px solid var(--line); border-radius:12px;
+    display:flex; flex-direction:column; align-items:center; gap:3px;
+    cursor:pointer; color:var(--ink); font-family:inherit; padding:5px 2px;
+  }
+  .cal-cell.empty{ background:transparent; border-color:transparent; cursor:default; }
+  .cal-cell.is-today{ border-color:var(--accent); border-width:1.5px; box-shadow:0 0 0 3px var(--accent-glow); }
+  .cal-cell.is-selected{ background:var(--accent-ink); border-color:var(--accent); }
+  .cal-daynum{ font-size:12.5px; font-weight:700; }
+  .cal-chips{ display:flex; flex-direction:column; align-items:stretch; gap:2px; width:100%; }
+  .cal-chip{
+    font-family:'IBM Plex Mono', monospace; font-size:8px; line-height:1.5; font-weight:600;
+    color:#fff; border-radius:4px; padding:0 3px; text-align:center;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .cal-chip-more{ font-size:7.5px; color:var(--ink-soft); text-align:center; font-weight:600; }
+  .cal-daypanel{ margin-top:16px; }
+  .cal-daypanel h3{ font-size:15px; margin:0 0 10px; }
+
+  /* ---- bottom nav ---- */
+  nav.tabbar{
+    position:fixed; left:0; right:0; bottom:14px; z-index:10;
+    display:flex; justify-content:center;
+    pointer-events:none;
+  }
+  nav.tabbar .inner{
+    pointer-events:auto;
+    max-width:520px; width:calc(100% - 28px);
+    margin:0 auto;
+    display:flex;
+    background:var(--surface);
+    backdrop-filter:blur(22px);
+    -webkit-backdrop-filter:blur(22px);
+    border:1px solid var(--line);
+    border-radius:999px;
+    box-shadow:var(--shadow);
+    padding:6px;
+  }
+  nav.tabbar button{
+    flex:1; border:none; background:transparent; padding:9px 4px; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; gap:2px;
+    color:var(--ink-soft); font-size:10.5px; font-weight:700; border-radius:999px;
+  }
+  nav.tabbar button .ic{ font-size:16px; }
+  nav.tabbar button.active{ color:var(--on-gradient); background:linear-gradient(135deg, var(--accent-strong), var(--accent)); }
+
+  .toast{
+    position:fixed; left:50%; bottom:88px; transform:translateX(-50%);
+    background:var(--surface-solid); color:var(--ink); border:1px solid var(--line); padding:11px 17px; border-radius:999px;
+    font-size:13px; display:flex; align-items:center; gap:12px; box-shadow:var(--shadow);
+    z-index:20; opacity:0; pointer-events:none; transition:opacity .2s ease;
+  }
+  .toast.show{ opacity:1; pointer-events:auto; }
+  .toast button{ background:none; border:none; color:var(--accent); font-weight:700; cursor:pointer; font-size:13px; }
+
+  [hidden]{ display:none !important; }
+</style>
+<script>
+  (function(){
+    try{
+      var saved = localStorage.getItem("ledgerTheme");
+      if (saved === "dark" || saved === "light"){
+        document.documentElement.setAttribute("data-theme", saved);
+      }
+    }catch(e){}
+  })();
+</script>
+</head>
+<body>
+
+<div id="gate">
+  <div class="gate-card">
+    <h1>Teaching Ledger</h1>
+    <p>Enter your passcode</p>
+    <form id="gateForm">
+      <input type="password" inputmode="numeric" id="gateInput" autocomplete="off" maxlength="20" autofocus>
+      <button type="submit">Unlock</button>
+      <div class="gate-error" id="gateError" hidden>Wrong passcode — try again.</div>
+    </form>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="brandrow">
+      <h1>Teaching Ledger</h1>
+      <div style="display:flex;gap:8px;">
+        <button class="theme-toggle" id="settingsBtn" aria-label="Customize colors">⚙</button>
+        <button class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode">☾</button>
+      </div>
+    </div>
+    <div class="section-label" id="sectionLabel">Dashboard</div>
+  </header>
+
+  <main id="main"></main>
+
+  <div class="toast" id="toast">
+    <span id="toastMsg"></span>
+    <button id="toastUndo">Undo</button>
+  </div>
+
+  <nav class="tabbar">
+    <div class="inner">
+      <button data-tab="dashboard" class="active"><span class="ic">◧</span>Dashboard</button>
+      <button data-tab="add"><span class="ic">+</span>Add</button>
+      <button data-tab="history"><span class="ic">☰</span>History</button>
+      <button data-tab="trash"><span class="ic">↺</span>Trash</button>
+    </div>
+  </nav>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+<script>
+  var firebaseConfig = {
+    apiKey: "YOUR_FIREBASE_API_KEY",
+    authDomain: "shraddha-income-tracker.firebaseapp.com",
+    projectId: "shraddha-income-tracker",
+    storageBucket: "shraddha-income-tracker.firebasestorage.app",
+    messagingSenderId: "1086782070038",
+    appId: "1:1086782070038:web:51dbb7d20a9d0924448437"
+  };
+  firebase.initializeApp(firebaseConfig);
+</script>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------------- passcode gate ----------------
+  var PASSCODE_HASH = "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4";
+  async function sha256Hex(str){
+    var enc = new TextEncoder().encode(str);
+    var buf = await crypto.subtle.digest("SHA-256", enc);
+    return Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2,"0"); }).join("");
+  }
+  function unlockApp(){
+    document.getElementById("gate").hidden = true;
+    document.getElementById("app").hidden = false;
+    initDb();
+    renderAll();
+  }
+  document.getElementById("gateForm").addEventListener("submit", async function(e){
+    e.preventDefault();
+    var val = document.getElementById("gateInput").value;
+    var hash = await sha256Hex(val);
+    if (hash === PASSCODE_HASH){
+      try{ localStorage.setItem("ledgerUnlocked", "1"); }catch(err){}
+      document.getElementById("gateError").hidden = true;
+      unlockApp();
+    } else {
+      document.getElementById("gateError").hidden = false;
+    }
+  });
+  (function checkRemembered(){
+    var already = false;
+    try{ already = localStorage.getItem("ledgerUnlocked") === "1"; }catch(err){}
+    if (already) unlockApp();
+  })();
+
+  // ---------------- Rate constants ----------------
+  var MASTERMATHS_RATE = 50;
+
+  var BLUETREE_BRACKETS = {
+    primary:   [{max:9,  rate:40}, {max:15, rate:45}],
+    secondary: [{max:10, rate:50}]
+  };
+  function bluetreeRate(level, students){
+    var brackets = BLUETREE_BRACKETS[level];
+    for (var i=0;i<brackets.length;i++){ if (students <= brackets[i].max) return brackets[i].rate; }
+    return brackets[brackets.length-1].rate;
+  }
+
+  var PRIMEPLUS_RATES = { "1-1":40, "pri":50, "sec":60 };
+  var PRIMEPLUS_LABELS = { "1-1":"1-to-1", "pri":"Primary group", "sec":"Secondary group" };
+
+  // Reserved for the Mind Stretcher integration (Dash sync, phase 2).
+  // Gross hourly rates, index 0 = class size 1 ... index 19 = size 20 (clamped above).
+  var MINDSTRETCHER_RATES = {
+    preprimary: {
+      weekday:[20,21,22,32,33,34,37,38,39,40,41,44,46,48,50,55,58,61,64,67],
+      weekend:[25,26,27,38,39,40,43,44,45,46,47,49,51,53,55,60,63,66,69,72]
+    },
+    p1_p4: {
+      weekday:[24,25,26,29,30,31,36,37,38,39,40,45,47,49,51,58,61,64,67,73],
+      weekend:[27,28,29,32,33,34,38,39,40,41,42,49,51,53,55,62,66,70,74,78]
+    },
+    p5_p6: {
+      weekday:[27,28,29,34,35,36,40,41,42,43,44,50,52,54,56,63,66,69,72,75],
+      weekend:[30,31,32,37,38,39,43,44,45,46,47,54,56,58,60,67,71,75,79,83]
+    },
+    p5_p6_writing: {
+      weekday:[30,31,32,37,38,39,43,44,45,46,47,54,56,58,60,66,69,72,75,78],
+      weekend:[33,34,35,40,41,42,48,49,50,51,52,59,61,63,65,72,76,80,84,88]
+    },
+    secondary: {
+      weekday:[30,31,32,37,38,39,44,45,46,47,48,55,57,59,61,68,72,76,80,84],
+      weekend:[35,36,37,42,43,44,49,51,52,53,54,60,62,64,66,73,77,81,85,89]
+    }
+  };
+
+  var ORG_META = {
+    mindstretcher: {label:"Mind Stretcher", color:"var(--org-mindstretcher)"},
+    ottodot:       {label:"Ottodot",        color:"var(--org-ottodot)"},
+    mastermaths:   {label:"Mastermaths",    color:"var(--org-mastermaths)"},
+    bluetree:      {label:"Bluetree",       color:"var(--org-bluetree)"},
+    primeplus:     {label:"PrimePlus",      color:"var(--org-primeplus)"}
+  };
+  var ORG_ORDER = ["mindstretcher","ottodot","mastermaths","bluetree","primeplus"];
+
+  // ---------------- org colors (customizable) ----------------
+  var DEFAULT_ORG_COLORS = {
+    mindstretcher:"#5A6FC4", ottodot:"#C97A46", mastermaths:"#3F9E8F", bluetree:"#3F8FB0", primeplus:"#B08A3A"
+  };
+  var orgColors = Object.assign({}, DEFAULT_ORG_COLORS);
+  function applyOrgColors(){
+    ORG_ORDER.forEach(function(o){ document.documentElement.style.setProperty("--org-"+o, orgColors[o]); });
+  }
+  async function saveOrgColor(org, hex){
+    orgColors[org] = hex;
+    applyOrgColors();
+    if (db) await db.doc("settings/colors").set(orgColors);
+  }
+  async function resetOrgColors(){
+    orgColors = Object.assign({}, DEFAULT_ORG_COLORS);
+    applyOrgColors();
+    if (db) await db.doc("settings/colors").set(orgColors);
+    renderSettings();
+  }
+
+  // ---------------- theme ----------------
+  function currentTheme(){
+    var attr = document.documentElement.getAttribute("data-theme");
+    if (attr) return attr;
+    return (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+  }
+  function updateThemeIcon(){
+    document.getElementById("themeToggle").textContent = currentTheme()==="dark" ? "☀" : "☾";
+  }
+  function setTheme(t){
+    document.documentElement.setAttribute("data-theme", t);
+    try{ localStorage.setItem("ledgerTheme", t); }catch(e){}
+    updateThemeIcon();
+  }
+  document.getElementById("themeToggle").addEventListener("click", function(){
+    setTheme(currentTheme()==="dark" ? "light" : "dark");
+  });
+  updateThemeIcon();
+  document.getElementById("settingsBtn").addEventListener("click", function(){
+    currentTab = "settings";
+    renderAll();
+  });
+
+  // ---------------- date helpers ----------------
+  function pad(n){ return String(n).padStart(2,"0"); }
+  function toDateStr(d){ return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); }
+  function todayStr(){ return toDateStr(new Date()); }
+  function addDays(dateStr, n){
+    var parts = dateStr.split("-").map(Number);
+    var d = new Date(parts[0], parts[1]-1, parts[2]);
+    d.setDate(d.getDate()+n);
+    return toDateStr(d);
+  }
+  function weekdayIdx(dateStr){ // 0=Mon..6=Sun
+    var parts = dateStr.split("-").map(Number);
+    var d = new Date(parts[0], parts[1]-1, parts[2]);
+    return (d.getDay()+6)%7;
+  }
+  var WEEKDAY_NAMES = ["mon","tue","wed","thu","fri","sat","sun"];
+  var WEEKDAY_LABELS = ["Mo","Tu","We","Th","Fr","Sa","Su"];
+  function mondayOf(dateStr){ return addDays(dateStr, -weekdayIdx(dateStr)); }
+  function sundayOf(dateStr){ return addDays(dateStr, 6-weekdayIdx(dateStr)); }
+  function monthRange(dateStr){
+    var parts = dateStr.split("-").map(Number);
+    var first = parts[0]+"-"+pad(parts[1])+"-01";
+    var lastDate = new Date(parts[0], parts[1], 0).getDate();
+    var last = parts[0]+"-"+pad(parts[1])+"-"+pad(lastDate);
+    return [first,last];
+  }
+  function fmtDate(dateStr){
+    var parts = dateStr.split("-").map(Number);
+    var d = new Date(parts[0], parts[1]-1, parts[2]);
+    return d.toLocaleDateString("en-SG",{day:"2-digit",month:"short",year:"numeric"});
+  }
+  function fmtMoney(n){
+    var sign = n<0 ? "-" : "";
+    return sign + "$" + Math.abs(n).toLocaleString("en-SG",{minimumFractionDigits:2,maximumFractionDigits:2});
+  }
+  function formatTime12h(t){
+    if (!t) return "";
+    var parts = t.split(":").map(Number);
+    var h = parts[0], m = parts[1]||0;
+    var ap = h>=12 ? "pm" : "am";
+    var h12 = h%12; if (h12===0) h12=12;
+    return h12 + (m ? ":"+String(m).padStart(2,"0") : "") + ap;
+  }
+  var OTTODOT_SUBJECT_LABELS = { SCI:"Sci", MATH:"Math", ENG:"Eng" };
+  function parseOttodotLabel(raw){
+    if (!raw) return null;
+    var m = raw.match(/^([A-Za-z]+\d+)\d{4}-([A-Za-z]+)-/);
+    if (!m) return null;
+    var level = m[1].toUpperCase();
+    var subjCode = m[2].toUpperCase();
+    var subj = OTTODOT_SUBJECT_LABELS[subjCode] || (subjCode.charAt(0)+subjCode.slice(1).toLowerCase());
+    return level + " " + subj;
+  }
+  function classTypeLabel(c){
+    if (c.org === "ottodot") return parseOttodotLabel(c.rawLabel);
+    return c.classLabel || null;
+  }
+
+  // ---------------- state ----------------
+  var db = null;
+  var classes = [];      // loaded from db
+  var seriesList = [];
+  var classesLoaded = false, seriesLoaded = false, materialized = false;
+  var currentTab = "dashboard";
+  var addOrg = null;           // which org's add-form is showing
+  var breakdownPeriod = "month"; // today | week | month
+  var historyOrgFilter = "all";
+  var historyView = "list";    // list | calendar
+  var calendarMonth = todayStr().slice(0,7);
+  var calendarSelected = todayStr();
+  var lastDeleted = null;      // {id, snapshot} for undo
+  var toastTimer = null;
+
+  var mainEl = document.getElementById("main");
+  var sectionLabelEl = document.getElementById("sectionLabel");
+
+  // ---------------- db init ----------------
+  async function initDb(){
+    try{
+      await firebase.auth().signInAnonymously();
+    }catch(e){ console.error("auth failed", e); renderAll(); return; }
+    db = firebase.firestore();
+
+    db.collection("classes").onSnapshot(function(snap){
+      classes = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); });
+      classesLoaded = true;
+      maybeMaterialize();
+      renderAll();
+    }, function(err){ console.error("classes onSnapshot", err); });
+
+    db.collection("series").onSnapshot(function(snap){
+      seriesList = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); });
+      seriesLoaded = true;
+      maybeMaterialize();
+      renderAll();
+    }, function(err){ console.error("series onSnapshot", err); });
+
+    db.doc("settings/colors").onSnapshot(function(snap){
+      var data = snap.exists ? snap.data() : {};
+      orgColors = Object.assign({}, DEFAULT_ORG_COLORS, data);
+      applyOrgColors();
+      if (currentTab === "settings") renderSettings();
+    }, function(err){ console.error("colors onSnapshot", err); });
+  }
+
+  function activeClasses(){ return classes.filter(function(c){ return !c.deletedAt; }); }
+
+  // ---------------- recurring materialization ----------------
+  var materializing = false;
+  function maybeMaterialize(){
+    if (!classesLoaded || !seriesLoaded || materializing || !db) return;
+    materializing = true;
+    var today = todayStr();
+    var horizon = addDays(today, 84);
+    var existingKeys = {};
+    classes.forEach(function(c){ if (c.seriesId) existingKeys[c.seriesId+"|"+c.date] = true; });
+
+    var toCreate = [];
+    seriesList.forEach(function(s){
+      if (!s.active) return;
+      var wIdx = WEEKDAY_NAMES.indexOf(s.weekday);
+      if (wIdx < 0) return;
+      var seriesHorizon = (s.endDate && s.endDate < horizon) ? s.endDate : horizon;
+      var cursor = s.startDate;
+      var cIdx = weekdayIdx(cursor);
+      var diff = (wIdx - cIdx + 7) % 7;
+      cursor = addDays(cursor, diff);
+      while (cursor <= seriesHorizon){
+        var key = s.id+"|"+cursor;
+        if (!existingKeys[key]){
+          toCreate.push(buildSeriesOccurrence(s, cursor));
+        }
+        cursor = addDays(cursor, 7);
+      }
+    });
+
+    if (toCreate.length === 0){ materializing = false; return; }
+    Promise.all(toCreate.map(function(doc){
+      return db.collection("classes").doc(doc.seriesId+"_"+doc.date).set(doc);
+    })).catch(function(e){ console.error("materialize failed", e); })
+      .finally(function(){ materializing = false; });
+  }
+
+  function buildSeriesOccurrence(s, date){
+    var computed = computeIncome(s.org, s);
+    return {
+      org: s.org,
+      date: date,
+      startTime: s.startTime,
+      durationHours: s.durationHours,
+      level: s.level || null,
+      category: s.category || null,
+      studentCount: s.studentCount || null,
+      classLabel: s.classLabel || null,
+      rate: computed.rate,
+      income: computed.income,
+      source: "manual-recurring",
+      seriesId: s.id,
+      deletedAt: null,
+      createdAt: Date.now()
+    };
+  }
+
+  // ---------------- income computation ----------------
+  function computeIncome(org, fields){
+    var dur = Number(fields.durationHours) || 0;
+    var rate = 0;
+    if (org === "mastermaths"){
+      rate = MASTERMATHS_RATE;
+    } else if (org === "bluetree"){
+      rate = bluetreeRate(fields.category, Number(fields.studentCount)||1);
+    } else if (org === "primeplus"){
+      rate = PRIMEPLUS_RATES[fields.category] || 0;
+    } else if (org === "ottodot"){
+      rate = 35;
+    } else if (org === "mindstretcher"){
+      rate = 0; // computed at sync time, not from this form
+    }
+    return { rate: rate, income: Math.round(rate*dur*100)/100 };
+  }
+
+  // ---------------- writes ----------------
+  async function saveOneOff(org, fields){
+    if (!db) return;
+    var computed = computeIncome(org, fields);
+    var doc = Object.assign({
+      org: org,
+      source: "manual",
+      seriesId: null,
+      deletedAt: null,
+      createdAt: Date.now(),
+      rate: computed.rate,
+      income: computed.income
+    }, fields);
+    await db.collection("classes").add(doc);
+  }
+
+  async function saveRecurring(org, fields){
+    if (!db) return;
+    var seriesDoc = {
+      org: org,
+      weekday: WEEKDAY_NAMES[weekdayIdx(fields.date)],
+      startTime: fields.startTime,
+      durationHours: fields.durationHours,
+      level: fields.level || null,
+      category: fields.category || null,
+      studentCount: fields.studentCount || null,
+      classLabel: fields.classLabel || null,
+      active: true,
+      startDate: fields.date,
+      endDate: fields.endDate || null,
+      createdAt: Date.now()
+    };
+    var ref = await db.collection("series").add(seriesDoc);
+    if (!seriesDoc.endDate || fields.date <= seriesDoc.endDate) {
+      var occ = buildSeriesOccurrence(Object.assign({id:ref.id}, seriesDoc), fields.date);
+      await db.collection("classes").doc(ref.id+"_"+fields.date).set(occ);
+    }
+  }
+
+  async function softDelete(classId){
+    if (!db) return;
+    var existing = classes.find(function(c){ return c.id===classId; });
+    lastDeleted = existing ? Object.assign({}, existing) : null;
+    await db.collection("classes").doc(classId).update({ deletedAt: Date.now() });
+    showToast("Class removed", true);
+  }
+  async function restore(classId){
+    if (!db) return;
+    await db.collection("classes").doc(classId).update({ deletedAt: null });
+  }
+  async function stopSeries(seriesId){
+    if (!db) return;
+    await db.collection("series").doc(seriesId).update({ active:false });
+    var today = todayStr();
+    var futureOnes = classes.filter(function(c){ return c.seriesId===seriesId && c.date>today && !c.deletedAt; });
+    for (var i=0;i<futureOnes.length;i++){
+      await db.collection("classes").doc(futureOnes[i].id).update({ deletedAt: Date.now() });
+    }
+  }
+
+  function showToast(msg, offerUndo){
+    var t = document.getElementById("toast");
+    document.getElementById("toastMsg").textContent = msg;
+    document.getElementById("toastUndo").hidden = !offerUndo;
+    t.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ t.classList.remove("show"); }, 6000);
+  }
+  document.getElementById("toastUndo").addEventListener("click", function(){
+    if (lastDeleted){ restore(lastDeleted.id); lastDeleted = null; }
+    document.getElementById("toast").classList.remove("show");
+  });
+
+  // ---------------- rendering ----------------
+  function renderAll(){
+    if (currentTab === "dashboard") renderDashboard();
+    else if (currentTab === "add") renderAdd();
+    else if (currentTab === "history") renderHistory();
+    else if (currentTab === "trash") renderTrash();
+    else if (currentTab === "settings") renderSettings();
+  }
+
+  function renderSettings(){
+    sectionLabelEl.textContent = "Customize colors";
+    var rows = ORG_ORDER.map(function(org){
+      var meta = ORG_META[org];
+      var hex = orgColors[org];
+      return '<div class="settings-row">'+
+        '<div class="settings-label"><span class="dot swatch-dot" style="background:'+hex+'"></span>'+meta.label+'</div>'+
+        '<input type="color" class="color-input" data-org="'+org+'" value="'+hex+'">'+
+      '</div>';
+    }).join("");
+    mainEl.innerHTML =
+      '<button class="back-link" id="settingsBack">← Back</button>'+
+      '<div class="card"><h2>Organisation colours</h2>'+
+        rows+
+        '<button id="resetColorsBtn" style="margin-top:16px;width:100%;background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:999px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;">Reset to defaults</button>'+
+      '</div>';
+    document.getElementById("settingsBack").addEventListener("click", function(){ setTab("dashboard"); });
+    mainEl.querySelectorAll(".color-input").forEach(function(inp){
+      inp.addEventListener("input", function(){
+        saveOrgColor(inp.getAttribute("data-org"), inp.value);
+        var dot = inp.closest(".settings-row").querySelector(".swatch-dot");
+        if (dot) dot.style.background = inp.value;
+      });
+    });
+    document.getElementById("resetColorsBtn").addEventListener("click", resetOrgColors);
+  }
+
+  function periodTotals(range){
+    var today = todayStr();
+    var earned = 0, projected = 0;
+    activeClasses().forEach(function(c){
+      if (c.date < range[0] || c.date > range[1]) return;
+      if (c.date <= today) earned += c.income; else projected += c.income;
+    });
+    return { earned:earned, projected:projected, combined:earned+projected };
+  }
+
+  function orgBreakdown(range){
+    var today = todayStr();
+    var map = {};
+    ORG_ORDER.forEach(function(o){ map[o] = {earned:0, projected:0}; });
+    activeClasses().forEach(function(c){
+      if (c.date < range[0] || c.date > range[1]) return;
+      if (!map[c.org]) map[c.org] = {earned:0, projected:0};
+      if (c.date <= today) map[c.org].earned += c.income; else map[c.org].projected += c.income;
+    });
+    return map;
+  }
+
+  function renderDashboard(){
+    sectionLabelEl.textContent = "Dashboard";
+    var today = todayStr();
+    var todayRange = [today, today];
+    var weekRange = [mondayOf(today), sundayOf(today)];
+    var monthRangeArr = monthRange(today);
+
+    var periods = [
+      {key:"today", label:"Today", totals: periodTotals(todayRange)},
+      {key:"week", label:"This Week", totals: periodTotals(weekRange)},
+      {key:"month", label:"This Month", totals: periodTotals(monthRangeArr)}
+    ];
+
+    var cardsHtml = periods.map(function(p){
+      return '<div class="period-card">'+
+        '<div class="p-label">'+p.label+'</div>'+
+        '<div class="p-combined display mono">'+fmtMoney(p.totals.combined)+'</div>'+
+        '<div class="p-row"><span class="k"><span class="dot earned"></span>Earned</span><span class="mono">'+fmtMoney(p.totals.earned)+'</span></div>'+
+        '<div class="p-row"><span class="k"><span class="dot projected"></span>Projected</span><span class="mono">'+fmtMoney(p.totals.projected)+'</span></div>'+
+      '</div>';
+    }).join("");
+
+    var rangeForBreakdown = breakdownPeriod==="today" ? todayRange : breakdownPeriod==="week" ? weekRange : monthRangeArr;
+    var bd = orgBreakdown(rangeForBreakdown);
+    var rowsHtml = ORG_ORDER.map(function(org){
+      var v = bd[org] || {earned:0, projected:0};
+      var combined = v.earned + v.projected;
+      if (combined === 0) return "";
+      var meta = ORG_META[org];
+      return '<div class="breakdown-row">'+
+        '<div class="org"><span class="dot" style="background:'+meta.color+'"></span>'+meta.label+'</div>'+
+        '<div class="amounts"><div class="combined mono">'+fmtMoney(combined)+'</div>'+
+          '<div class="split mono">'+fmtMoney(v.earned)+' earned · '+fmtMoney(v.projected)+' proj.</div></div>'+
+      '</div>';
+    }).join("");
+    if (!rowsHtml) rowsHtml = '<div class="empty-note">No classes logged for this period yet.</div>';
+
+    mainEl.innerHTML =
+      '<div class="period-scroller">'+cardsHtml+'</div>'+
+      '<div class="card">'+
+        '<h2>Quick add</h2>'+
+        '<div class="quickgrid">'+
+          quickBtn("mastermaths","Mastermaths")+
+          quickBtn("bluetree","Bluetree")+
+          quickBtn("primeplus","PrimePlus")+
+        '</div>'+
+      '</div>'+
+      '<div class="card">'+
+        '<h2>Breakdown by organisation</h2>'+
+        '<div class="seg" style="margin-bottom:12px;">'+
+          segBtn("today","Today")+segBtn("week","Week")+segBtn("month","Month")+
+        '</div>'+
+        rowsHtml+
+      '</div>';
+
+    mainEl.querySelectorAll("[data-quick]").forEach(function(btn){
+      btn.addEventListener("click", function(){ addOrg = btn.getAttribute("data-quick"); setTab("add"); });
+    });
+    mainEl.querySelectorAll("[data-seg]").forEach(function(btn){
+      btn.addEventListener("click", function(){ breakdownPeriod = btn.getAttribute("data-seg"); renderDashboard(); });
+    });
+  }
+
+  function quickBtn(org, label){
+    return '<button class="quickbtn" data-quick="'+org+'"><span class="swatch" style="background:'+ORG_META[org].color+';color:'+ORG_META[org].color+'"></span>'+label+'</button>';
+  }
+  function segBtn(key, label){
+    return '<button data-seg="'+key+'" class="'+(breakdownPeriod===key?"active":"")+'">'+label+'</button>';
+  }
+
+  // ---- Add ----
+  function renderAdd(){
+    sectionLabelEl.textContent = "Add a class";
+    if (!addOrg){
+      mainEl.innerHTML =
+        '<div class="card"><h2>Which organisation?</h2>'+
+          '<div class="quickgrid">'+
+            quickBtn("mastermaths","Mastermaths")+
+            quickBtn("bluetree","Bluetree")+
+            quickBtn("primeplus","PrimePlus")+
+          '</div>'+
+        '</div>'+
+        '<div class="comingsoon">Mind Stretcher &amp; Ottodot are synced in automatically, so there\'s no manual entry for them here.</div>';
+      mainEl.querySelectorAll("[data-quick]").forEach(function(btn){
+        btn.addEventListener("click", function(){ addOrg = btn.getAttribute("data-quick"); renderAdd(); });
+      });
+      return;
+    }
+    var org = addOrg;
+    var today = todayStr();
+
+    var extraFieldsHtml = "";
+    if (org === "bluetree"){
+      extraFieldsHtml =
+        '<div class="field"><label>Level</label><div class="choice-row" id="levelChoice">'+
+          '<button data-val="primary" class="active">Primary</button>'+
+          '<button data-val="secondary">Secondary</button>'+
+        '</div></div>'+
+        '<div class="field"><label>Number of students</label><input type="number" id="studentCount" min="1" step="1" value="1"></div>';
+    } else if (org === "primeplus"){
+      extraFieldsHtml =
+        '<div class="field"><label>Category</label><div class="choice-row" id="catChoice">'+
+          '<button data-val="1-1" class="active">1-to-1</button>'+
+          '<button data-val="pri">Primary</button>'+
+          '<button data-val="sec">Secondary</button>'+
+        '</div></div>';
+    }
+
+    mainEl.innerHTML =
+      '<button class="back-link" id="backBtn">← Choose a different organisation</button>'+
+      '<div class="card">'+
+        '<h2 style="color:'+ORG_META[org].color+'">'+ORG_META[org].label+'</h2>'+
+        '<div class="field"><label>Date</label><input type="date" id="fDate" value="'+today+'"></div>'+
+        '<div class="field"><label>Start time</label><input type="time" id="fTime" value="16:00"></div>'+
+        '<div class="field"><label>Duration (hours)</label><input type="number" id="fDuration" min="0.25" step="0.25" value="1"></div>'+
+        '<div class="field"><label>Class / level (optional)</label><input type="text" id="fClassLabel" placeholder="e.g. P4 Math"></div>'+
+        extraFieldsHtml+
+        '<div class="toggle-row"><span class="t-label">Repeats weekly</span><button class="switch" id="fRecurring"><span class="knob"></span></button></div>'+
+        '<div class="field" id="endDateField" hidden><label>Ends on (optional)</label><input type="date" id="fEndDate"></div>'+
+        '<div class="rate-preview"><span>Estimated pay</span><span class="mono" id="ratePreview">'+fmtMoney(0)+'</span></div>'+
+        '<button class="save-btn" id="saveBtn">Save class</button>'+
+      '</div>';
+
+    document.getElementById("backBtn").addEventListener("click", function(){ addOrg=null; renderAdd(); });
+
+    var recurringOn = false;
+    var levelVal = "primary";
+    var catVal = org==="primeplus" ? "1-1" : null;
+
+    function updatePreview(){
+      var fields = {
+        durationHours: Number(document.getElementById("fDuration").value)||0,
+        category: org==="bluetree" ? levelVal : catVal,
+        studentCount: org==="bluetree" ? Number(document.getElementById("studentCount").value)||1 : null
+      };
+      var c = computeIncome(org, fields);
+      document.getElementById("ratePreview").textContent = fmtMoney(c.income) + "  ("+fmtMoney(c.rate)+"/h)";
+    }
+
+    document.getElementById("fDuration").addEventListener("input", updatePreview);
+    if (org === "bluetree"){
+      document.getElementById("studentCount").addEventListener("input", updatePreview);
+      mainEl.querySelectorAll("#levelChoice button").forEach(function(btn){
+        btn.addEventListener("click", function(){
+          mainEl.querySelectorAll("#levelChoice button").forEach(function(b){ b.classList.remove("active"); });
+          btn.classList.add("active");
+          levelVal = btn.getAttribute("data-val");
+          updatePreview();
+        });
+      });
+    }
+    if (org === "primeplus"){
+      mainEl.querySelectorAll("#catChoice button").forEach(function(btn){
+        btn.addEventListener("click", function(){
+          mainEl.querySelectorAll("#catChoice button").forEach(function(b){ b.classList.remove("active"); });
+          btn.classList.add("active");
+          catVal = btn.getAttribute("data-val");
+          updatePreview();
+        });
+      });
+    }
+    document.getElementById("fRecurring").addEventListener("click", function(){
+      recurringOn = !recurringOn;
+      this.classList.toggle("on", recurringOn);
+      document.getElementById("endDateField").hidden = !recurringOn;
+    });
+
+    document.getElementById("saveBtn").addEventListener("click", async function(){
+      var fields = {
+        date: document.getElementById("fDate").value,
+        startTime: document.getElementById("fTime").value,
+        durationHours: Number(document.getElementById("fDuration").value)||0,
+        category: org==="bluetree" ? levelVal : catVal,
+        studentCount: org==="bluetree" ? (Number(document.getElementById("studentCount").value)||1) : null,
+        level: null,
+        classLabel: document.getElementById("fClassLabel").value.trim() || null,
+        endDate: document.getElementById("fEndDate").value || null
+      };
+      this.disabled = true;
+      this.textContent = "Saving…";
+      try{
+        if (recurringOn) await saveRecurring(org, fields);
+        else await saveOneOff(org, fields);
+        showToast("Class saved", false);
+        addOrg = null;
+        setTab("dashboard");
+      }catch(e){
+        console.error(e);
+        this.disabled = false;
+        this.textContent = "Save class";
+        showToast("Couldn't save — try again", false);
+      }
+    });
+
+    updatePreview();
+  }
+
+  // ---- History ----
+  function renderHistory(){
+    sectionLabelEl.textContent = "History";
+
+    var chips = '<div class="filter-row">' +
+      '<button class="chip '+(historyOrgFilter==="all"?"active":"")+'" data-org="all">All</button>' +
+      ORG_ORDER.map(function(o){
+        return '<button class="chip '+(historyOrgFilter===o?"active":"")+'" data-org="'+o+'">'+
+          '<span class="dot" style="background:'+ORG_META[o].color+'"></span>'+ORG_META[o].label+'</button>';
+      }).join("") +
+    '</div>';
+
+    var viewToggle = '<div class="seg">' +
+        '<button data-view="list" class="'+(historyView==="list"?"active":"")+'">List</button>' +
+        '<button data-view="calendar" class="'+(historyView==="calendar"?"active":"")+'">Calendar</button>' +
+      '</div>';
+
+    var bodyHtml = historyView === "calendar" ? renderCalendarHtml() : renderListHtml();
+
+    mainEl.innerHTML = '<div style="display:flex;flex-direction:column;gap:16px;">'+chips+viewToggle+bodyHtml+'</div>';
+
+    mainEl.querySelectorAll("[data-org]").forEach(function(btn){
+      btn.addEventListener("click", function(){ historyOrgFilter = btn.getAttribute("data-org"); renderHistory(); });
+    });
+    mainEl.querySelectorAll("[data-view]").forEach(function(btn){
+      btn.addEventListener("click", function(){ historyView = btn.getAttribute("data-view"); renderHistory(); });
+    });
+    mainEl.querySelectorAll("[data-del]").forEach(function(btn){
+      btn.addEventListener("click", function(){ softDelete(btn.getAttribute("data-del")); });
+    });
+    mainEl.querySelectorAll("[data-stop]").forEach(function(btn){
+      btn.addEventListener("click", function(){ stopSeries(btn.getAttribute("data-stop")); });
+    });
+
+    if (historyView === "calendar"){
+      var prevBtn = document.getElementById("calPrev"), nextBtn = document.getElementById("calNext");
+      if (prevBtn) prevBtn.addEventListener("click", function(){ calendarMonth = shiftMonth(calendarMonth,-1); renderHistory(); });
+      if (nextBtn) nextBtn.addEventListener("click", function(){ calendarMonth = shiftMonth(calendarMonth,1); renderHistory(); });
+      mainEl.querySelectorAll("[data-date]").forEach(function(btn){
+        btn.addEventListener("click", function(){ calendarSelected = btn.getAttribute("data-date"); renderHistory(); });
+      });
+    }
+  }
+
+  function renderListHtml(){
+    var list = activeClasses().slice().sort(function(a,b){ return b.date.localeCompare(a.date); });
+    if (historyOrgFilter !== "all") list = list.filter(function(c){ return c.org===historyOrgFilter; });
+    var itemsHtml = list.map(renderClassItem).join("") || '<div class="empty-note">No classes match this filter.</div>';
+    return '<div class="class-list">'+itemsHtml+'</div>';
+  }
+
+  function shiftMonth(ym, delta){
+    var parts = ym.split("-").map(Number);
+    var d = new Date(parts[0], parts[1]-1+delta, 1);
+    return d.getFullYear()+"-"+pad(d.getMonth()+1);
+  }
+  function monthMatrix(ym){
+    var parts = ym.split("-").map(Number);
+    var year=parts[0], month=parts[1];
+    var firstDateStr = year+"-"+pad(month)+"-01";
+    var firstWeekday = weekdayIdx(firstDateStr);
+    var daysInMonth = new Date(year, month, 0).getDate();
+    var cells = [];
+    for (var i=0;i<firstWeekday;i++) cells.push(null);
+    for (var d=1; d<=daysInMonth; d++) cells.push(year+"-"+pad(month)+"-"+pad(d));
+    while (cells.length % 7 !== 0) cells.push(null);
+    var weeks = [];
+    for (var w=0; w<cells.length; w+=7) weeks.push(cells.slice(w,w+7));
+    return weeks;
+  }
+
+  function renderCalendarHtml(){
+    var weeks = monthMatrix(calendarMonth);
+    var ymParts = calendarMonth.split("-").map(Number);
+    var monthLabel = new Date(ymParts[0], ymParts[1]-1, 1).toLocaleDateString("en-SG",{month:"long", year:"numeric"});
+    var today = todayStr();
+
+    var byDate = {};
+    activeClasses().forEach(function(c){
+      if (historyOrgFilter!=="all" && c.org!==historyOrgFilter) return;
+      if (!byDate[c.date]) byDate[c.date] = [];
+      byDate[c.date].push(c);
+    });
+    Object.keys(byDate).forEach(function(d){ byDate[d].sort(function(a,b){ return (a.startTime||"").localeCompare(b.startTime||""); }); });
+
+    var headerRow = '<div class="cal-week cal-head">' + WEEKDAY_LABELS.map(function(l){ return '<div class="cal-wd">'+l+'</div>'; }).join('') + '</div>';
+
+    var cellsHtml = weeks.map(function(week){
+      return '<div class="cal-week">' + week.map(function(dateStr){
+        if (!dateStr) return '<div class="cal-cell empty"></div>';
+        var dayList = byDate[dateStr] || [];
+        var chips = dayList.slice(0,3).map(function(c){
+          var meta = ORG_META[c.org] || {color:"var(--ink-soft)"};
+          return '<span class="cal-chip" style="background:'+meta.color+'">'+formatTime12h(c.startTime)+'</span>';
+        }).join("");
+        var more = dayList.length>3 ? '<span class="cal-chip-more">+'+(dayList.length-3)+' more</span>' : "";
+        var cls = "cal-cell" + (dateStr===today?" is-today":"") + (dateStr===calendarSelected?" is-selected":"");
+        var dayNum = Number(dateStr.split("-")[2]);
+        return '<button class="'+cls+'" data-date="'+dateStr+'"><span class="cal-daynum">'+dayNum+'</span><div class="cal-chips">'+chips+more+'</div></button>';
+      }).join("") + '</div>';
+    }).join("");
+
+    var monthR = monthRange(calendarMonth+"-01");
+    var mTotals = periodTotals(monthR);
+
+    var panelHtml = "";
+    if (calendarSelected && calendarSelected.slice(0,7)===calendarMonth){
+      var dayClasses = activeClasses().filter(function(c){
+        return c.date===calendarSelected && (historyOrgFilter==="all"||c.org===historyOrgFilter);
+      });
+      panelHtml = '<div class="cal-daypanel"><h3 class="display">'+fmtDate(calendarSelected)+'</h3>' +
+        (dayClasses.length ? '<div class="class-list">'+dayClasses.map(renderClassItem).join("")+'</div>' : '<div class="empty-note">No classes this day.</div>') +
+      '</div>';
+    }
+
+    return '<div class="card">' +
+      '<div class="cal-nav">' +
+        '<button class="icon-btn" id="calPrev">‹</button>' +
+        '<div class="cal-month display">'+monthLabel+'</div>' +
+        '<button class="icon-btn" id="calNext">›</button>' +
+      '</div>' +
+      '<div class="cal-summary">Month combined <span class="mono">'+fmtMoney(mTotals.combined)+'</span> — '+fmtMoney(mTotals.earned)+' earned · '+fmtMoney(mTotals.projected)+' projected</div>' +
+      '<div class="cal-grid">'+headerRow+cellsHtml+'</div>' +
+      panelHtml +
+    '</div>';
+  }
+
+  function renderClassItem(c){
+    var today = todayStr();
+    var isFuture = c.date > today;
+    var meta = ORG_META[c.org] || {label:c.org, color:"var(--ink-soft)"};
+    var subBits = [];
+    var typeLabel = classTypeLabel(c);
+    if (typeLabel) subBits.push(typeLabel);
+    if (c.category) subBits.push(PRIMEPLUS_LABELS[c.category] || c.category);
+    if (c.studentCount) subBits.push(c.studentCount + " students");
+    if (c.startTime) subBits.push(formatTime12h(c.startTime));
+    var seriesBtn = c.seriesId ? '<button class="icon-btn" title="Stop repeating" data-stop="'+c.seriesId+'">⟲</button>' : "";
+    return '<div class="class-item">'+
+      '<div class="left">'+
+        '<div class="top-line"><span class="dot" style="background:'+meta.color+'"></span>'+meta.label+
+          (c.source && c.source.indexOf("synced")===0 ? '<span class="tag-badge">synced</span>' : (c.seriesId?'<span class="tag-badge">weekly</span>':''))+
+        '</div>'+
+        '<div class="sub-line mono">'+fmtDate(c.date)+' · '+subBits.join(" · ")+'</div>'+
+      '</div>'+
+      '<div class="right">'+
+        '<span class="income mono '+(isFuture?"future":"past")+'">'+fmtMoney(c.income)+'</span>'+
+        seriesBtn+
+        '<button class="icon-btn danger" title="Delete" data-del="'+c.id+'">✕</button>'+
+      '</div>'+
+    '</div>';
+  }
+
+  // ---- Trash ----
+  function renderTrash(){
+    sectionLabelEl.textContent = "Trash";
+    var list = classes.filter(function(c){ return c.deletedAt; }).sort(function(a,b){ return b.deletedAt - a.deletedAt; });
+    var itemsHtml = list.map(function(c){
+      var meta = ORG_META[c.org] || {label:c.org, color:"var(--ink-soft)"};
+      return '<div class="class-item">'+
+        '<div class="left">'+
+          '<div class="top-line"><span class="dot" style="background:'+meta.color+'"></span>'+meta.label+'</div>'+
+          '<div class="sub-line mono">'+fmtDate(c.date)+' · '+fmtMoney(c.income)+'</div>'+
+        '</div>'+
+        '<div class="right"><button class="restore-btn" data-restore="'+c.id+'">Restore</button></div>'+
+      '</div>';
+    }).join("") || '<div class="empty-note">Nothing in the trash.</div>';
+
+    mainEl.innerHTML = '<div class="class-list">'+itemsHtml+'</div>';
+    mainEl.querySelectorAll("[data-restore]").forEach(function(btn){
+      btn.addEventListener("click", function(){ restore(btn.getAttribute("data-restore")); });
+    });
+
+    // lazily purge anything older than 30 days
+    var cutoff = Date.now() - 30*24*60*60*1000;
+    classes.filter(function(c){ return c.deletedAt && c.deletedAt < cutoff; }).forEach(function(c){
+      if (db) db.collection("classes").doc(c.id).delete();
+    });
+  }
+
+  function setTab(tab){
+    currentTab = tab;
+    document.querySelectorAll("nav.tabbar button").forEach(function(b){
+      b.classList.toggle("active", b.getAttribute("data-tab")===tab);
+    });
+    renderAll();
+  }
+  document.querySelectorAll("nav.tabbar button").forEach(function(b){
+    b.addEventListener("click", function(){
+      if (b.getAttribute("data-tab") !== "add") addOrg = null;
+      setTab(b.getAttribute("data-tab"));
+    });
+  });
+
+  renderAll();
+})();
+</script>
+</body>
+</html>
