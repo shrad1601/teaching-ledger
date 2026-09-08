@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mind Stretcher -> Teaching Ledger Sync
 // @namespace    shraddha-teaching-ledger
-// @version      1.0
+// @version      1.1
 // @description  Reads your Dash schedule + attendance and writes classes straight into your Teaching Ledger (Firestore). No copy-paste.
 // @match        https://dash.mindstretcher.com/teacher/my-schedule/*
 // @grant        none
@@ -145,6 +145,48 @@
     if (!res.ok) throw new Error("Firestore write failed (" + res.status + "): " + (await res.text()));
   }
 
+  // Previously-synced Mind Stretcher classes still marked active (deletedAt == null).
+  // Used to detect sessions that vanished from Dash (cancelled/rescheduled) so we can
+  // soft-delete them the same way the ledger UI does.
+  async function fetchActiveSyncedDocs() {
+    var token = await ensureAuth();
+    var url =
+      "https://firestore.googleapis.com/v1/projects/" + FIREBASE_PROJECT_ID +
+      "/databases/(default)/documents:runQuery";
+    var body = {
+      structuredQuery: {
+        from: [{ collectionId: "classes" }],
+        where: {
+          compositeFilter: {
+            op: "AND",
+            filters: [
+              { fieldFilter: { field: { fieldPath: "org" }, op: "EQUAL", value: { stringValue: "mindstretcher" } } },
+              { fieldFilter: { field: { fieldPath: "source" }, op: "EQUAL", value: { stringValue: "synced-mindstretcher" } } }
+            ]
+          }
+        }
+      }
+    };
+    var res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error("Firestore query failed (" + res.status + "): " + (await res.text()));
+    var rows = await res.json();
+    var out = [];
+    rows.forEach(function (row) {
+      if (!row.document) return;
+      var id = row.document.name.split("/").pop();
+      var fields = row.document.fields || {};
+      var deletedAt = fields.deletedAt && (fields.deletedAt.doubleValue || fields.deletedAt.integerValue);
+      var date = fields.date && fields.date.stringValue;
+      if (deletedAt || !date) return; // already deleted, skip
+      out.push({ id: id, date: date });
+    });
+    return out;
+  }
+
   // ---------------- Dash scraping ----------------
   async function fetchScheduleWeek(weekStart) {
     var res = await fetch("https://dash.mindstretcher.com/teacher/my-schedule/?week_start=" + weekStart, {
@@ -235,10 +277,12 @@
         for (var w = startMonday; w <= horizon; w = addDaysToDateStr(w, 7)) weeks.push(w);
 
         var written = 0, skippedUnknownLevel = [], skippedNoAttendance = 0;
+        var seenDocIds = {}; // every session currently on Dash in the synced window, so we can detect removals
 
         for (var wi = 0; wi < weeks.length; wi++) {
           say("Reading week " + (wi + 1) + "/" + weeks.length + "…");
           var sessions = await fetchScheduleWeek(weeks[wi]);
+          sessions.forEach(function (s) { seenDocIds["mindstretcher_" + s.sessionId] = true; });
           for (var si = 0; si < sessions.length; si++) {
             var s = sessions[si];
             var level = levelFromTitle(s.title);
@@ -284,6 +328,23 @@
           say(skippedUnknownLevel.length + " skipped (unrecognized level): " + Array.from(new Set(skippedUnknownLevel)).join(", "));
         }
         if (skippedNoAttendance) say(skippedNoAttendance + " skipped (couldn't read attendance).");
+
+        say("Checking for classes removed from Dash…");
+        var removed = 0;
+        try {
+          var activeSynced = await fetchActiveSyncedDocs();
+          for (var ai = 0; ai < activeSynced.length; ai++) {
+            var doc = activeSynced[ai];
+            // Only touch docs inside the window we just scanned; leave older history alone.
+            if (doc.date < startMonday || doc.date > horizon) continue;
+            if (seenDocIds[doc.id]) continue;
+            await writeClassDoc(doc.id, { deletedAt: Date.now() });
+            removed++;
+          }
+          say(removed + " classes removed (no longer on Dash).");
+        } catch (e) {
+          say("Warning: couldn't check for removed classes: " + e.message);
+        }
       } catch (err) {
         say("Error: " + err.message);
         console.error(err);

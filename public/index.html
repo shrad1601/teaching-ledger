@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Teaching Ledger</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%92%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700;800&family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <style>
   :root{
@@ -419,6 +420,30 @@
   nav.tabbar button .ic{ font-size:16px; }
   nav.tabbar button.active{ color:var(--on-gradient); background:linear-gradient(135deg, var(--accent-strong), var(--accent)); }
 
+  /* ---- class detail modal ---- */
+  .class-item{ cursor:pointer; }
+  .cal-chip{ cursor:pointer; }
+  .modal-overlay{
+    position:fixed; inset:0; z-index:50; background:rgba(15,10,19,0.5);
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .modal-card{
+    width:100%; max-width:360px; max-height:80vh; overflow-y:auto;
+    background:var(--surface-solid); border:1px solid var(--line); border-radius:20px;
+    padding:20px; box-shadow:var(--shadow);
+  }
+  .modal-head{ display:flex; align-items:center; gap:9px; margin-bottom:14px; }
+  .modal-head h3{ flex:1; margin:0; font-size:16px; }
+  .modal-head .icon-btn{ font-size:16px; }
+  .detail-row{ display:flex; justify-content:space-between; gap:14px; padding:10px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .detail-row:last-of-type{ border-bottom:none; }
+  .detail-row .k{ color:var(--ink-soft); font-weight:600; }
+  .detail-row .v{ font-weight:700; text-align:right; }
+  .modal-actions{ margin-top:14px; display:flex; gap:8px; }
+  .modal-actions .icon-btn{
+    flex:1; border:1px solid var(--line); border-radius:12px; padding:9px; font-size:12.5px; font-weight:700;
+  }
+
   .toast{
     position:fixed; left:50%; bottom:88px; transform:translateX(-50%);
     background:var(--surface-solid); color:var(--ink); border:1px solid var(--line); padding:11px 17px; border-radius:999px;
@@ -699,6 +724,7 @@
   var calendarSelected = todayStr();
   var lastDeleted = null;      // {id, snapshot} for undo
   var toastTimer = null;
+  var detailClassId = null;    // which class's detail modal is open
 
   var mainEl = document.getElementById("main");
   var sectionLabelEl = document.getElementById("sectionLabel");
@@ -1169,6 +1195,12 @@
     mainEl.querySelectorAll("[data-stop]").forEach(function(btn){
       btn.addEventListener("click", function(){ stopSeries(btn.getAttribute("data-stop")); });
     });
+    mainEl.querySelectorAll(".class-item[data-detail]").forEach(function(row){
+      row.addEventListener("click", function(e){
+        if (e.target.closest("button")) return;
+        openDetail(row.getAttribute("data-detail"));
+      });
+    });
 
     if (historyView === "calendar"){
       var prevBtn = document.getElementById("calPrev"), nextBtn = document.getElementById("calNext");
@@ -1176,6 +1208,15 @@
       if (nextBtn) nextBtn.addEventListener("click", function(){ calendarMonth = shiftMonth(calendarMonth,1); renderHistory(); });
       mainEl.querySelectorAll("[data-date]").forEach(function(btn){
         btn.addEventListener("click", function(){ calendarSelected = btn.getAttribute("data-date"); renderHistory(); });
+      });
+      mainEl.querySelectorAll("[data-detailchip]").forEach(function(chip){
+        chip.addEventListener("click", function(e){
+          e.stopPropagation();
+          var id = chip.getAttribute("data-detailchip");
+          var c = classes.find(function(cc){ return cc.id===id; });
+          if (c) calendarSelected = c.date;
+          openDetail(id);
+        });
       });
     }
   }
@@ -1229,7 +1270,7 @@
         var dayList = byDate[dateStr] || [];
         var chips = dayList.slice(0,3).map(function(c){
           var meta = ORG_META[c.org] || {color:"var(--ink-soft)"};
-          return '<span class="cal-chip" style="background:'+meta.color+'">'+formatTime12h(c.startTime)+'</span>';
+          return '<span class="cal-chip" data-detailchip="'+c.id+'" style="background:'+meta.color+'">'+formatTime12h(c.startTime)+'</span>';
         }).join("");
         var more = dayList.length>3 ? '<span class="cal-chip-more">+'+(dayList.length-3)+' more</span>' : "";
         var cls = "cal-cell" + (dateStr===today?" is-today":"") + (dateStr===calendarSelected?" is-selected":"");
@@ -1274,7 +1315,7 @@
     if (c.studentCount) subBits.push(c.studentCount + " students");
     if (c.startTime) subBits.push(formatTime12h(c.startTime));
     var seriesBtn = c.seriesId ? '<button class="icon-btn" title="Stop repeating" data-stop="'+c.seriesId+'">⟲</button>' : "";
-    return '<div class="class-item">'+
+    return '<div class="class-item" data-detail="'+c.id+'">'+
       '<div class="left">'+
         '<div class="top-line"><span class="dot" style="background:'+meta.color+'"></span>'+meta.label+
           (c.source && c.source.indexOf("synced")===0 ? '<span class="tag-badge">synced</span>' : (c.seriesId?'<span class="tag-badge">weekly</span>':''))+
@@ -1287,6 +1328,61 @@
         '<button class="icon-btn danger" title="Delete" data-del="'+c.id+'">✕</button>'+
       '</div>'+
     '</div>';
+  }
+
+  // ---- Class detail modal ----
+  var SOURCE_LABELS = {
+    "synced-mindstretcher": "Synced (Mind Stretcher)",
+    "manual": "Manual entry",
+    "manual-recurring": "Manual entry (weekly)"
+  };
+  function detailRows(c){
+    var rows = [];
+    var meta = ORG_META[c.org] || {label:c.org};
+    rows.push(["Organisation", meta.label]);
+    rows.push(["Date", fmtDate(c.date)]);
+    if (c.startTime) rows.push(["Start time", formatTime12h(c.startTime)]);
+    if (c.durationHours) rows.push(["Duration", c.durationHours + " hr" + (Number(c.durationHours)===1?"":"s")]);
+    var typeLabel = classTypeLabel(c);
+    if (typeLabel) rows.push(["Class / level", typeLabel]);
+    if (c.category) rows.push(["Category", PRIMEPLUS_LABELS[c.category] || c.category]);
+    if (c.studentCount != null) rows.push(["Students", c.studentCount]);
+    if (c.weekdayOrWeekend) rows.push(["Day type", c.weekdayOrWeekend]);
+    rows.push(["Hourly rate", c.rate != null ? fmtMoney(c.rate) + "/hr" : "—"]);
+    rows.push(["Income", fmtMoney(c.income)]);
+    if (c.source) rows.push(["Source", SOURCE_LABELS[c.source] || c.source]);
+    return rows;
+  }
+  function openDetail(classId){ detailClassId = classId; renderDetailModal(); }
+  function closeDetail(){ detailClassId = null; renderDetailModal(); }
+  function renderDetailModal(){
+    var existing = document.getElementById("detailOverlay");
+    if (existing) existing.remove();
+    if (!detailClassId) return;
+    var c = classes.find(function(cc){ return cc.id===detailClassId; });
+    if (!c){ detailClassId = null; return; }
+    var meta = ORG_META[c.org] || {label:c.org, color:"var(--ink-soft)"};
+    var rowsHtml = detailRows(c).map(function(r){
+      return '<div class="detail-row"><span class="k">'+r[0]+'</span><span class="v mono">'+r[1]+'</span></div>';
+    }).join("");
+    var overlay = document.createElement("div");
+    overlay.id = "detailOverlay";
+    overlay.className = "modal-overlay";
+    overlay.innerHTML =
+      '<div class="modal-card">'+
+        '<div class="modal-head"><span class="dot" style="background:'+meta.color+'"></span><h3>'+meta.label+'</h3>'+
+          '<button class="icon-btn" id="detailCloseBtn" aria-label="Close">✕</button>'+
+        '</div>'+
+        rowsHtml+
+        '<div class="modal-actions"><button class="icon-btn danger" id="detailDeleteBtn">Delete class</button></div>'+
+      '</div>';
+    document.body.appendChild(overlay);
+    overlay.addEventListener("click", function(e){ if (e.target === overlay) closeDetail(); });
+    document.getElementById("detailCloseBtn").addEventListener("click", closeDetail);
+    document.getElementById("detailDeleteBtn").addEventListener("click", function(){
+      softDelete(c.id);
+      closeDetail();
+    });
   }
 
   // ---- Trash ----
@@ -1317,6 +1413,7 @@
   }
 
   function setTab(tab){
+    closeDetail();
     currentTab = tab;
     document.querySelectorAll("nav.tabbar button").forEach(function(b){
       b.classList.toggle("active", b.getAttribute("data-tab")===tab);
