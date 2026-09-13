@@ -600,6 +600,26 @@
     }
   };
 
+  var MINDSTRETCHER_LEVELS = [
+    {key:"preprimary", label:"Pre-Primary"},
+    {key:"p1_p4", label:"P1–P4"},
+    {key:"p5_p6", label:"P5–P6"},
+    {key:"p5_p6_writing", label:"P5–P6 Writing"},
+    {key:"secondary", label:"Secondary"}
+  ];
+  function isWeekendDate(dateStr){
+    if (!dateStr) return false;
+    var idx = weekdayIdx(dateStr);
+    return idx===5 || idx===6;
+  }
+  function mindstretcherRate(level, weekend, size){
+    var table = MINDSTRETCHER_RATES[level];
+    if (!table) return 0;
+    var arr = weekend ? table.weekend : table.weekday;
+    var idx = Math.min(Math.max(Number(size)||1,1),20) - 1;
+    return arr[idx];
+  }
+
   var ORG_META = {
     mindstretcher: {label:"Mind Stretcher", color:"var(--org-mindstretcher)"},
     ottodot:       {label:"Ottodot",        color:"var(--org-ottodot)"},
@@ -725,6 +745,7 @@
   var lastDeleted = null;      // {id, snapshot} for undo
   var toastTimer = null;
   var detailClassId = null;    // which class's detail modal is open
+  var detailEditMode = false;  // is the detail modal showing the edit form
 
   var mainEl = document.getElementById("main");
   var sectionLabelEl = document.getElementById("sectionLabel");
@@ -797,7 +818,7 @@
   }
 
   function buildSeriesOccurrence(s, date){
-    var computed = computeIncome(s.org, s);
+    var computed = computeIncome(s.org, Object.assign({}, s, {date: date}));
     return {
       org: s.org,
       date: date,
@@ -807,6 +828,7 @@
       category: s.category || null,
       studentCount: s.studentCount || null,
       classLabel: s.classLabel || null,
+      description: s.description || null,
       rate: computed.rate,
       income: computed.income,
       source: "manual-recurring",
@@ -829,7 +851,7 @@
     } else if (org === "ottodot"){
       rate = 35;
     } else if (org === "mindstretcher"){
-      rate = 0; // computed at sync time, not from this form
+      rate = mindstretcherRate(fields.level, isWeekendDate(fields.date || fields.startDate), fields.studentCount);
     }
     return { rate: rate, income: Math.round(rate*dur*100)/100 };
   }
@@ -861,6 +883,7 @@
       category: fields.category || null,
       studentCount: fields.studentCount || null,
       classLabel: fields.classLabel || null,
+      description: fields.description || null,
       active: true,
       startDate: fields.date,
       endDate: fields.endDate || null,
@@ -1045,9 +1068,11 @@
             quickBtn("mastermaths","Mastermaths")+
             quickBtn("bluetree","Bluetree")+
             quickBtn("primeplus","PrimePlus")+
+            quickBtn("mindstretcher","Mind Stretcher")+
+            quickBtn("ottodot","Ottodot")+
           '</div>'+
         '</div>'+
-        '<div class="comingsoon">Mind Stretcher &amp; Ottodot are synced in automatically, so there\'s no manual entry for them here.</div>';
+        '<div class="comingsoon">Mind Stretcher &amp; Ottodot are usually synced in automatically — use manual entry here only to fix a gap the sync missed.</div>';
       mainEl.querySelectorAll("[data-quick]").forEach(function(btn){
         btn.addEventListener("click", function(){ addOrg = btn.getAttribute("data-quick"); renderAdd(); });
       });
@@ -1055,6 +1080,7 @@
     }
     var org = addOrg;
     var today = todayStr();
+    var needsLevelChoice = org === "bluetree" || org === "mindstretcher";
 
     var extraFieldsHtml = "";
     if (org === "bluetree"){
@@ -1071,6 +1097,12 @@
           '<button data-val="pri">Primary</button>'+
           '<button data-val="sec">Secondary</button>'+
         '</div></div>';
+    } else if (org === "mindstretcher"){
+      extraFieldsHtml =
+        '<div class="field"><label>Level</label><div class="choice-row" id="levelChoice">'+
+          MINDSTRETCHER_LEVELS.map(function(l,i){ return '<button data-val="'+l.key+'" class="'+(i===0?"active":"")+'">'+l.label+'</button>'; }).join("")+
+        '</div></div>'+
+        '<div class="field"><label>Number of students</label><input type="number" id="studentCount" min="1" step="1" value="1"></div>';
     }
 
     mainEl.innerHTML =
@@ -1081,6 +1113,7 @@
         '<div class="field"><label>Start time</label><input type="time" id="fTime" value="16:00"></div>'+
         '<div class="field"><label>Duration (hours)</label><input type="number" id="fDuration" min="0.25" step="0.25" value="1"></div>'+
         '<div class="field"><label>Class / level (optional)</label><input type="text" id="fClassLabel" placeholder="e.g. P4 Math"></div>'+
+        '<div class="field"><label>Description / notes (optional)</label><input type="text" id="fDescription" placeholder="anything worth remembering about this class"></div>'+
         extraFieldsHtml+
         '<div class="toggle-row"><span class="t-label">Repeats weekly</span><button class="switch" id="fRecurring"><span class="knob"></span></button></div>'+
         '<div class="field" id="endDateField" hidden><label>Ends on (optional)</label><input type="date" id="fEndDate"></div>'+
@@ -1091,21 +1124,24 @@
     document.getElementById("backBtn").addEventListener("click", function(){ addOrg=null; renderAdd(); });
 
     var recurringOn = false;
-    var levelVal = "primary";
+    var levelVal = org==="mindstretcher" ? MINDSTRETCHER_LEVELS[0].key : "primary";
     var catVal = org==="primeplus" ? "1-1" : null;
 
     function updatePreview(){
       var fields = {
+        date: document.getElementById("fDate").value,
         durationHours: Number(document.getElementById("fDuration").value)||0,
         category: org==="bluetree" ? levelVal : catVal,
-        studentCount: org==="bluetree" ? Number(document.getElementById("studentCount").value)||1 : null
+        studentCount: needsLevelChoice ? Number(document.getElementById("studentCount").value)||1 : null,
+        level: org==="mindstretcher" ? levelVal : null
       };
       var c = computeIncome(org, fields);
       document.getElementById("ratePreview").textContent = fmtMoney(c.income) + "  ("+fmtMoney(c.rate)+"/h)";
     }
 
     document.getElementById("fDuration").addEventListener("input", updatePreview);
-    if (org === "bluetree"){
+    document.getElementById("fDate").addEventListener("input", updatePreview); // Mind Stretcher's rate depends on weekday vs weekend
+    if (needsLevelChoice){
       document.getElementById("studentCount").addEventListener("input", updatePreview);
       mainEl.querySelectorAll("#levelChoice button").forEach(function(btn){
         btn.addEventListener("click", function(){
@@ -1138,9 +1174,10 @@
         startTime: document.getElementById("fTime").value,
         durationHours: Number(document.getElementById("fDuration").value)||0,
         category: org==="bluetree" ? levelVal : catVal,
-        studentCount: org==="bluetree" ? (Number(document.getElementById("studentCount").value)||1) : null,
-        level: null,
+        studentCount: needsLevelChoice ? (Number(document.getElementById("studentCount").value)||1) : null,
+        level: org==="mindstretcher" ? levelVal : null,
         classLabel: document.getElementById("fClassLabel").value.trim() || null,
+        description: document.getElementById("fDescription").value.trim() || null,
         endDate: document.getElementById("fEndDate").value || null
       };
       this.disabled = true;
@@ -1333,6 +1370,7 @@
   // ---- Class detail modal ----
   var SOURCE_LABELS = {
     "synced-mindstretcher": "Synced (Mind Stretcher)",
+    "synced-ottodot": "Synced (Ottodot)",
     "manual": "Manual entry",
     "manual-recurring": "Manual entry (weekly)"
   };
@@ -1350,11 +1388,144 @@
     if (c.weekdayOrWeekend) rows.push(["Day type", c.weekdayOrWeekend]);
     rows.push(["Hourly rate", c.rate != null ? fmtMoney(c.rate) + "/hr" : "—"]);
     rows.push(["Income", fmtMoney(c.income)]);
+    if (c.description) rows.push(["Notes", c.description]);
     if (c.source) rows.push(["Source", SOURCE_LABELS[c.source] || c.source]);
     return rows;
   }
-  function openDetail(classId){ detailClassId = classId; renderDetailModal(); }
-  function closeDetail(){ detailClassId = null; renderDetailModal(); }
+  function openDetail(classId){ detailClassId = classId; detailEditMode = false; renderDetailModal(); }
+  function closeDetail(){ detailClassId = null; detailEditMode = false; renderDetailModal(); }
+  function attrEscape(s){ return String(s||"").replace(/"/g,"&quot;"); }
+
+  function editFormHtml(c, meta){
+    var org = c.org;
+    var isOttodot = org === "ottodot";
+    var labelValue = isOttodot ? (c.rawLabel||"") : (c.classLabel||"");
+
+    var extraFieldsHtml = "";
+    if (org === "bluetree"){
+      extraFieldsHtml =
+        '<div class="field"><label>Level</label><div class="choice-row" id="editLevelChoice">'+
+          '<button data-val="primary" class="'+(c.category!=="secondary"?"active":"")+'">Primary</button>'+
+          '<button data-val="secondary" class="'+(c.category==="secondary"?"active":"")+'">Secondary</button>'+
+        '</div></div>'+
+        '<div class="field"><label>Number of students</label><input type="number" id="editStudentCount" min="1" step="1" value="'+(c.studentCount||1)+'"></div>';
+    } else if (org === "primeplus"){
+      extraFieldsHtml =
+        '<div class="field"><label>Category</label><div class="choice-row" id="editCatChoice">'+
+          ["1-1","pri","sec"].map(function(k){
+            var isActive = c.category ? c.category===k : k==="1-1";
+            return '<button data-val="'+k+'" class="'+(isActive?"active":"")+'">'+PRIMEPLUS_LABELS[k]+'</button>';
+          }).join("")+
+        '</div></div>';
+    } else if (org === "mindstretcher"){
+      extraFieldsHtml =
+        '<div class="field"><label>Level</label><div class="choice-row" id="editLevelChoice">'+
+          MINDSTRETCHER_LEVELS.map(function(l){ return '<button data-val="'+l.key+'" class="'+(c.level===l.key?"active":"")+'">'+l.label+'</button>'; }).join("")+
+        '</div></div>'+
+        '<div class="field"><label>Number of students</label><input type="number" id="editStudentCount" min="1" step="1" value="'+(c.studentCount||1)+'"></div>';
+    }
+
+    return '<div class="modal-card">'+
+      '<div class="modal-head"><span class="dot" style="background:'+meta.color+'"></span><h3>Edit — '+meta.label+'</h3>'+
+        '<button class="icon-btn" id="editCloseBtn" aria-label="Close">✕</button>'+
+      '</div>'+
+      '<div class="field"><label>Date</label><input type="date" id="editDate" value="'+c.date+'"></div>'+
+      '<div class="field"><label>Start time</label><input type="time" id="editTime" value="'+attrEscape(c.startTime||"")+'"></div>'+
+      '<div class="field"><label>Duration (hours)</label><input type="number" id="editDuration" min="0.25" step="0.25" value="'+(c.durationHours||1)+'"></div>'+
+      '<div class="field"><label>Class / level (optional)</label><input type="text" id="editClassLabel" value="'+attrEscape(labelValue)+'"></div>'+
+      '<div class="field"><label>Description / notes (optional)</label><input type="text" id="editDescription" value="'+attrEscape(c.description||"")+'"></div>'+
+      extraFieldsHtml+
+      '<div class="rate-preview"><span>Estimated pay</span><span class="mono" id="editRatePreview">'+fmtMoney(c.income||0)+'</span></div>'+
+      '<div class="modal-actions"><button class="icon-btn" id="editCancelBtn">Cancel</button><button class="icon-btn" id="editSaveBtn">Save changes</button></div>'+
+    '</div>';
+  }
+
+  function wireEditForm(c){
+    var org = c.org;
+    var needsLevelChoice = org === "bluetree" || org === "mindstretcher";
+    document.getElementById("editCloseBtn").addEventListener("click", closeDetail);
+    document.getElementById("editCancelBtn").addEventListener("click", function(){ detailEditMode = false; renderDetailModal(); });
+
+    var levelVal = org==="mindstretcher" ? (c.level || MINDSTRETCHER_LEVELS[0].key) : (c.category==="secondary" ? "secondary" : "primary");
+    var catVal = org==="primeplus" ? (c.category || "1-1") : null;
+
+    function currentFields(){
+      return {
+        date: document.getElementById("editDate").value,
+        durationHours: Number(document.getElementById("editDuration").value)||0,
+        category: org==="bluetree" ? levelVal : catVal,
+        studentCount: needsLevelChoice ? (Number(document.getElementById("editStudentCount").value)||1) : null,
+        level: org==="mindstretcher" ? levelVal : null
+      };
+    }
+    function updateEditPreview(){
+      var comp = computeIncome(org, currentFields());
+      document.getElementById("editRatePreview").textContent = fmtMoney(comp.income) + "  ("+fmtMoney(comp.rate)+"/h)";
+    }
+
+    document.getElementById("editDuration").addEventListener("input", updateEditPreview);
+    document.getElementById("editDate").addEventListener("input", updateEditPreview);
+    if (needsLevelChoice){
+      document.getElementById("editStudentCount").addEventListener("input", updateEditPreview);
+      document.querySelectorAll("#editLevelChoice button").forEach(function(btn){
+        btn.addEventListener("click", function(){
+          document.querySelectorAll("#editLevelChoice button").forEach(function(b){ b.classList.remove("active"); });
+          btn.classList.add("active");
+          levelVal = btn.getAttribute("data-val");
+          updateEditPreview();
+        });
+      });
+    }
+    if (org === "primeplus"){
+      document.querySelectorAll("#editCatChoice button").forEach(function(btn){
+        btn.addEventListener("click", function(){
+          document.querySelectorAll("#editCatChoice button").forEach(function(b){ b.classList.remove("active"); });
+          btn.classList.add("active");
+          catVal = btn.getAttribute("data-val");
+          updateEditPreview();
+        });
+      });
+    }
+
+    updateEditPreview();
+
+    document.getElementById("editSaveBtn").addEventListener("click", async function(){
+      var fields = currentFields();
+      var labelVal = document.getElementById("editClassLabel").value.trim() || null;
+      var descVal = document.getElementById("editDescription").value.trim() || null;
+      var startTimeVal = document.getElementById("editTime").value || null;
+      var computed = computeIncome(org, fields);
+
+      var updateDoc = {
+        date: fields.date,
+        startTime: startTimeVal,
+        durationHours: fields.durationHours,
+        category: fields.category,
+        studentCount: fields.studentCount,
+        level: fields.level,
+        description: descVal,
+        rate: computed.rate,
+        income: computed.income
+      };
+      if (org === "ottodot") updateDoc.rawLabel = labelVal;
+      else updateDoc.classLabel = labelVal;
+
+      this.disabled = true;
+      this.textContent = "Saving…";
+      try{
+        await db.collection("classes").doc(c.id).update(updateDoc);
+        showToast("Class updated", false);
+        detailEditMode = false;
+        renderDetailModal();
+      }catch(e){
+        console.error(e);
+        this.disabled = false;
+        this.textContent = "Save changes";
+        showToast("Couldn't save — try again", false);
+      }
+    });
+  }
+
   function renderDetailModal(){
     var existing = document.getElementById("detailOverlay");
     if (existing) existing.remove();
@@ -1362,23 +1533,33 @@
     var c = classes.find(function(cc){ return cc.id===detailClassId; });
     if (!c){ detailClassId = null; return; }
     var meta = ORG_META[c.org] || {label:c.org, color:"var(--ink-soft)"};
-    var rowsHtml = detailRows(c).map(function(r){
-      return '<div class="detail-row"><span class="k">'+r[0]+'</span><span class="v mono">'+r[1]+'</span></div>';
-    }).join("");
     var overlay = document.createElement("div");
     overlay.id = "detailOverlay";
     overlay.className = "modal-overlay";
+
+    if (detailEditMode){
+      overlay.innerHTML = editFormHtml(c, meta);
+      document.body.appendChild(overlay);
+      overlay.addEventListener("click", function(e){ if (e.target === overlay) closeDetail(); });
+      wireEditForm(c);
+      return;
+    }
+
+    var rowsHtml = detailRows(c).map(function(r){
+      return '<div class="detail-row"><span class="k">'+r[0]+'</span><span class="v mono">'+r[1]+'</span></div>';
+    }).join("");
     overlay.innerHTML =
       '<div class="modal-card">'+
         '<div class="modal-head"><span class="dot" style="background:'+meta.color+'"></span><h3>'+meta.label+'</h3>'+
           '<button class="icon-btn" id="detailCloseBtn" aria-label="Close">✕</button>'+
         '</div>'+
         rowsHtml+
-        '<div class="modal-actions"><button class="icon-btn danger" id="detailDeleteBtn">Delete class</button></div>'+
+        '<div class="modal-actions"><button class="icon-btn" id="detailEditBtn">Edit</button><button class="icon-btn danger" id="detailDeleteBtn">Delete class</button></div>'+
       '</div>';
     document.body.appendChild(overlay);
     overlay.addEventListener("click", function(e){ if (e.target === overlay) closeDetail(); });
     document.getElementById("detailCloseBtn").addEventListener("click", closeDetail);
+    document.getElementById("detailEditBtn").addEventListener("click", function(){ detailEditMode = true; renderDetailModal(); });
     document.getElementById("detailDeleteBtn").addEventListener("click", function(){
       softDelete(c.id);
       closeDetail();
