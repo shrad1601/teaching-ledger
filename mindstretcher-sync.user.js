@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mind Stretcher -> Teaching Ledger Sync
 // @namespace    shraddha-teaching-ledger
-// @version      1.1
+// @version      1.2
 // @description  Reads your Dash schedule + attendance and writes classes straight into your Teaching Ledger (Firestore). No copy-paste.
 // @match        https://dash.mindstretcher.com/teacher/my-schedule/*
 // @grant        none
@@ -118,16 +118,25 @@
     return idToken;
   }
 
+  function toFirestoreValue(v) {
+    if (v === null || v === undefined) return { nullValue: null };
+    if (typeof v === "number") return { doubleValue: v };
+    if (typeof v === "boolean") return { booleanValue: v };
+    if (Array.isArray(v)) return { arrayValue: { values: v.map(toFirestoreValue) } };
+    if (typeof v === "object") return { mapValue: { fields: toFirestoreFields(v) } };
+    return { stringValue: String(v) };
+  }
   function toFirestoreFields(obj) {
     var fields = {};
-    Object.keys(obj).forEach(function (k) {
-      var v = obj[k];
-      if (v === null || v === undefined) fields[k] = { nullValue: null };
-      else if (typeof v === "number") fields[k] = { doubleValue: v };
-      else if (typeof v === "boolean") fields[k] = { booleanValue: v };
-      else fields[k] = { stringValue: String(v) };
-    });
+    Object.keys(obj).forEach(function (k) { fields[k] = toFirestoreValue(obj[k]); });
     return fields;
+  }
+  function numField(fields, key) {
+    var f = fields[key];
+    if (!f) return null;
+    if (f.doubleValue !== undefined) return f.doubleValue;
+    if (f.integerValue !== undefined) return Number(f.integerValue);
+    return null;
   }
 
   async function writeClassDoc(docId, data) {
@@ -145,10 +154,20 @@
     if (!res.ok) throw new Error("Firestore write failed (" + res.status + "): " + (await res.text()));
   }
 
-  // Previously-synced Mind Stretcher classes still marked active (deletedAt == null).
-  // Used to detect sessions that vanished from Dash (cancelled/rescheduled) so we can
-  // soft-delete them the same way the ledger UI does.
-  async function fetchActiveSyncedDocs() {
+  async function writeSyncRun(doc) {
+    var token = await ensureAuth();
+    var url = "https://firestore.googleapis.com/v1/projects/" + FIREBASE_PROJECT_ID + "/databases/(default)/documents/syncRuns";
+    var res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+      body: JSON.stringify({ fields: toFirestoreFields(doc) })
+    });
+    if (!res.ok) throw new Error("Firestore syncRuns write failed (" + res.status + "): " + (await res.text()));
+  }
+
+  // Every previously-synced Mind Stretcher class (active or soft-deleted) with enough
+  // fields to diff against this run's data, so we can tell what actually changed.
+  async function fetchExistingSyncedDocs() {
     var token = await ensureAuth();
     var url =
       "https://firestore.googleapis.com/v1/projects/" + FIREBASE_PROJECT_ID +
@@ -179,10 +198,16 @@
       if (!row.document) return;
       var id = row.document.name.split("/").pop();
       var fields = row.document.fields || {};
-      var deletedAt = fields.deletedAt && (fields.deletedAt.doubleValue || fields.deletedAt.integerValue);
-      var date = fields.date && fields.date.stringValue;
-      if (deletedAt || !date) return; // already deleted, skip
-      out.push({ id: id, date: date });
+      out.push({
+        id: id,
+        date: fields.date && fields.date.stringValue,
+        startTime: fields.startTime && fields.startTime.stringValue,
+        classLabel: fields.classLabel && fields.classLabel.stringValue,
+        income: numField(fields, "income"),
+        durationHours: numField(fields, "durationHours"),
+        studentCount: numField(fields, "studentCount"),
+        deletedAt: numField(fields, "deletedAt")
+      });
     });
     return out;
   }
@@ -276,8 +301,14 @@
         var weeks = [];
         for (var w = startMonday; w <= horizon; w = addDaysToDateStr(w, 7)) weeks.push(w);
 
+        say("Checking what's already synced…");
+        var existingList = await fetchExistingSyncedDocs();
+        var existingByDocId = {};
+        existingList.forEach(function (d) { existingByDocId[d.id] = d; });
+
         var written = 0, skippedUnknownLevel = [], skippedNoAttendance = 0;
         var seenDocIds = {}; // every session currently on Dash in the synced window, so we can detect removals
+        var changes = [];
 
         for (var wi = 0; wi < weeks.length; wi++) {
           say("Reading week " + (wi + 1) + "/" + weeks.length + "…");
@@ -302,8 +333,18 @@
             var weekend = s.weekday === "Sat" || s.weekday === "Sun";
             var rate = rateFor(level, weekend, billableSize);
             var income = Math.round(rate * s.durationHours * 100) / 100;
+            var docId = "mindstretcher_" + s.sessionId;
 
-            await writeClassDoc("mindstretcher_" + s.sessionId, {
+            var existing = existingByDocId[docId];
+            if (!existing) {
+              changes.push({ type: "added", docId: docId, classLabel: s.title, date: s.date, income: income });
+            } else if (existing.deletedAt) {
+              changes.push({ type: "restored", docId: docId, classLabel: s.title, date: s.date, income: income });
+            } else if (existing.income !== income || existing.durationHours !== s.durationHours || existing.startTime !== s.startTime || existing.studentCount !== billableSize) {
+              changes.push({ type: "updated", docId: docId, classLabel: s.title, date: s.date, income: income, fromIncome: existing.income });
+            }
+
+            await writeClassDoc(docId, {
               org: "mindstretcher",
               date: s.date,
               startTime: s.startTime,
@@ -324,6 +365,16 @@
         }
 
         say("Done. " + written + " classes synced.");
+        var addedCount = changes.filter(function (c) { return c.type === "added"; }).length;
+        var updatedCount = changes.filter(function (c) { return c.type === "updated"; }).length;
+        var restoredCount = changes.filter(function (c) { return c.type === "restored"; }).length;
+        if (addedCount || updatedCount || restoredCount) {
+          var bits = [];
+          if (addedCount) bits.push(addedCount + " new");
+          if (updatedCount) bits.push(updatedCount + " updated");
+          if (restoredCount) bits.push(restoredCount + " restored");
+          say(bits.join(", ") + ".");
+        }
         if (skippedUnknownLevel.length) {
           say(skippedUnknownLevel.length + " skipped (unrecognized level): " + Array.from(new Set(skippedUnknownLevel)).join(", "));
         }
@@ -332,18 +383,33 @@
         say("Checking for classes removed from Dash…");
         var removed = 0;
         try {
-          var activeSynced = await fetchActiveSyncedDocs();
-          for (var ai = 0; ai < activeSynced.length; ai++) {
-            var doc = activeSynced[ai];
+          for (var ai = 0; ai < existingList.length; ai++) {
+            var doc = existingList[ai];
+            if (doc.deletedAt) continue; // already inactive
             // Only touch docs inside the window we just scanned; leave older history alone.
-            if (doc.date < startMonday || doc.date > horizon) continue;
+            if (!doc.date || doc.date < startMonday || doc.date > horizon) continue;
             if (seenDocIds[doc.id]) continue;
             await writeClassDoc(doc.id, { deletedAt: Date.now() });
+            changes.push({ type: "removed", docId: doc.id, classLabel: doc.classLabel, date: doc.date, income: doc.income, reason: "no longer on Dash" });
             removed++;
           }
           say(removed + " classes removed (no longer on Dash).");
         } catch (e) {
           say("Warning: couldn't check for removed classes: " + e.message);
+        }
+
+        try {
+          await writeSyncRun({
+            org: "mindstretcher",
+            runAt: Date.now(),
+            written: written,
+            skippedUnknownLevel: skippedUnknownLevel.length,
+            skippedNoAttendance: skippedNoAttendance,
+            removed: removed,
+            changes: changes
+          });
+        } catch (e) {
+          say("Warning: couldn't save sync log: " + e.message);
         }
       } catch (err) {
         say("Error: " + err.message);

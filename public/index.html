@@ -348,6 +348,23 @@
     background:var(--surface-2); color:var(--ink-soft); border-radius:6px; padding:2px 6px;
   }
 
+  /* ---- sync log ---- */
+  .change-badge{
+    font-size:9.5px; text-transform:uppercase; letter-spacing:0.04em; font-weight:700;
+    border-radius:6px; padding:2px 6px; display:inline-block;
+  }
+  .change-badge.added, .change-badge.restored{ background:var(--accent-ink); color:var(--accent); }
+  .change-badge.updated{ background:var(--rose-ink); color:var(--rose); }
+  .change-badge.removed{ background:var(--danger-ink); color:var(--danger); }
+  .sync-run-card{
+    background:var(--surface); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+    border:1px solid var(--line); border-radius:20px; padding:16px; box-shadow:var(--shadow);
+  }
+  .sync-run-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:2px; }
+  .sync-run-head .org{ display:flex; align-items:center; gap:8px; font-size:13.5px; font-weight:700; }
+  .sync-run-head .when{ font-size:11px; color:var(--ink-soft); }
+  .sync-run-summary{ font-size:12px; color:var(--ink-soft); margin-bottom:10px; }
+
   .settings-row{ display:flex; align-items:center; justify-content:space-between; padding:11px 0; border-bottom:1px solid var(--line); }
   .settings-row:last-of-type{ border-bottom:none; }
   .settings-label{ display:flex; align-items:center; gap:9px; font-size:13.5px; font-weight:600; }
@@ -746,6 +763,8 @@
   var toastTimer = null;
   var detailClassId = null;    // which class's detail modal is open
   var detailEditMode = false;  // is the detail modal showing the edit form
+  var syncRuns = [];           // recent sync script runs, newest first
+  var syncRunsLoaded = false;
 
   var mainEl = document.getElementById("main");
   var sectionLabelEl = document.getElementById("sectionLabel");
@@ -777,6 +796,12 @@
       applyOrgColors();
       if (currentTab === "settings") renderSettings();
     }, function(err){ console.error("colors onSnapshot", err); });
+
+    db.collection("syncRuns").orderBy("runAt","desc").limit(30).onSnapshot(function(snap){
+      syncRuns = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); });
+      syncRunsLoaded = true;
+      renderAll();
+    }, function(err){ console.error("syncRuns onSnapshot", err); });
   }
 
   function activeClasses(){ return classes.filter(function(c){ return !c.deletedAt; }); }
@@ -1214,9 +1239,12 @@
     var viewToggle = '<div class="seg">' +
         '<button data-view="list" class="'+(historyView==="list"?"active":"")+'">List</button>' +
         '<button data-view="calendar" class="'+(historyView==="calendar"?"active":"")+'">Calendar</button>' +
+        '<button data-view="synclog" class="'+(historyView==="synclog"?"active":"")+'">Sync Log</button>' +
       '</div>';
 
-    var bodyHtml = historyView === "calendar" ? renderCalendarHtml() : renderListHtml();
+    var bodyHtml = historyView === "calendar" ? renderCalendarHtml()
+      : historyView === "synclog" ? renderSyncLogHtml()
+      : renderListHtml();
 
     mainEl.innerHTML = '<div style="display:flex;flex-direction:column;gap:16px;">'+chips+viewToggle+bodyHtml+'</div>';
 
@@ -1263,6 +1291,66 @@
     if (historyOrgFilter !== "all") list = list.filter(function(c){ return c.org===historyOrgFilter; });
     var itemsHtml = list.map(renderClassItem).join("") || '<div class="empty-note">No classes match this filter.</div>';
     return '<div class="class-list">'+itemsHtml+'</div>';
+  }
+
+  // ---- Sync log ----
+  var CHANGE_TYPE_LABELS = { added:"New", updated:"Updated", removed:"Removed", restored:"Restored" };
+  function formatRunTime(ms){
+    if (!ms) return "";
+    var d = new Date(ms);
+    return d.toLocaleDateString("en-SG",{day:"2-digit",month:"short"}) + ", " + d.toLocaleTimeString("en-SG",{hour:"numeric",minute:"2-digit"});
+  }
+  function changeLabel(run, ch){
+    if (run.org === "ottodot") return (ch.rawLabel && parseOttodotLabel(ch.rawLabel)) || ch.rawLabel || "";
+    return ch.classLabel || "";
+  }
+  function renderChangeRow(run, ch){
+    var label = changeLabel(run, ch);
+    var sub = fmtDate(ch.date) + (label ? " · " + label : "");
+    var reasonHtml = ch.reason ? '<div class="sub-line mono" style="opacity:.75;">'+ch.reason+'</div>' : "";
+    var amountText = ch.type === "updated" && ch.fromIncome != null
+      ? fmtMoney(ch.fromIncome) + " → " + fmtMoney(ch.income||0)
+      : fmtMoney(ch.income||0);
+    return '<div class="class-item" style="cursor:default;">'+
+      '<div class="left">'+
+        '<div class="top-line"><span class="change-badge '+ch.type+'">'+(CHANGE_TYPE_LABELS[ch.type]||ch.type)+'</span></div>'+
+        '<div class="sub-line mono">'+sub+'</div>'+
+        reasonHtml+
+      '</div>'+
+      '<div class="right"><span class="income mono '+(ch.type==="removed"?"future":"past")+'">'+amountText+'</span></div>'+
+    '</div>';
+  }
+  function renderSyncRunCard(run){
+    var meta = ORG_META[run.org] || {label:run.org, color:"var(--ink-soft)"};
+    var changes = run.changes || [];
+    var counts = { added:0, updated:0, restored:0, removed:0 };
+    changes.forEach(function(ch){ if (counts[ch.type] != null) counts[ch.type]++; });
+    var summaryBits = [];
+    if (run.written != null) summaryBits.push(run.written + " synced");
+    if (counts.added) summaryBits.push(counts.added + " new");
+    if (counts.updated) summaryBits.push(counts.updated + " updated");
+    if (counts.restored) summaryBits.push(counts.restored + " restored");
+    if (counts.removed) summaryBits.push(counts.removed + " removed");
+
+    var changesHtml = changes.length
+      ? '<div class="class-list">' + changes.map(function(ch){ return renderChangeRow(run, ch); }).join("") + '</div>'
+      : '<div class="empty-note" style="padding:0;">No changes — everything already matched.</div>';
+
+    return '<div class="sync-run-card">'+
+      '<div class="sync-run-head">'+
+        '<div class="org"><span class="dot" style="background:'+meta.color+'"></span>'+meta.label+'</div>'+
+        '<div class="when mono">'+formatRunTime(run.runAt)+'</div>'+
+      '</div>'+
+      '<div class="sync-run-summary">'+(summaryBits.join(" · ")||"no changes")+'</div>'+
+      changesHtml+
+    '</div>';
+  }
+  function renderSyncLogHtml(){
+    var list = syncRuns;
+    if (historyOrgFilter !== "all") list = list.filter(function(r){ return r.org===historyOrgFilter; });
+    if (!syncRunsLoaded) return '<div class="empty-note">Loading…</div>';
+    if (!list.length) return '<div class="empty-note">No syncs recorded yet. Run "Sync to Ledger" from the Mind Stretcher or Ottodot tab and it\'ll show up here.</div>';
+    return '<div style="display:flex;flex-direction:column;gap:12px;">' + list.map(renderSyncRunCard).join("") + '</div>';
   }
 
   function shiftMonth(ym, delta){

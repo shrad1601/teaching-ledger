@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ottodot Airtable -> Teaching Ledger Sync
 // @namespace    shraddha-teaching-ledger
-// @version      1.1
+// @version      1.2
 // @description  Reads your Ottodot Airtable schedule and writes classes straight into your Teaching Ledger (Firestore). No copy-paste.
 // @match        https://airtable.com/apptZFP6ejwcRA6Il/*
 // @grant        none
@@ -55,16 +55,25 @@
     return idToken;
   }
 
+  function toFirestoreValue(v) {
+    if (v === null || v === undefined) return { nullValue: null };
+    if (typeof v === "number") return { doubleValue: v };
+    if (typeof v === "boolean") return { booleanValue: v };
+    if (Array.isArray(v)) return { arrayValue: { values: v.map(toFirestoreValue) } };
+    if (typeof v === "object") return { mapValue: { fields: toFirestoreFields(v) } };
+    return { stringValue: String(v) };
+  }
   function toFirestoreFields(obj) {
     var fields = {};
-    Object.keys(obj).forEach(function (k) {
-      var v = obj[k];
-      if (v === null || v === undefined) fields[k] = { nullValue: null };
-      else if (typeof v === "number") fields[k] = { doubleValue: v };
-      else if (typeof v === "boolean") fields[k] = { booleanValue: v };
-      else fields[k] = { stringValue: String(v) };
-    });
+    Object.keys(obj).forEach(function (k) { fields[k] = toFirestoreValue(obj[k]); });
     return fields;
+  }
+  function numField(fields, key) {
+    var f = fields[key];
+    if (!f) return null;
+    if (f.doubleValue !== undefined) return f.doubleValue;
+    if (f.integerValue !== undefined) return Number(f.integerValue);
+    return null;
   }
 
   async function writeClassDoc(docId, data) {
@@ -82,10 +91,20 @@
     if (!res.ok) throw new Error("Firestore write failed (" + res.status + "): " + (await res.text()));
   }
 
-  // Previously-synced Ottodot classes still marked active (deletedAt == null).
-  // Used to detect rows that vanished from Airtable so we can soft-delete them
-  // the same way the ledger UI does.
-  async function fetchActiveSyncedDocs() {
+  async function writeSyncRun(doc) {
+    var token = await ensureAuth();
+    var url = "https://firestore.googleapis.com/v1/projects/" + FIREBASE_PROJECT_ID + "/databases/(default)/documents/syncRuns";
+    var res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+      body: JSON.stringify({ fields: toFirestoreFields(doc) })
+    });
+    if (!res.ok) throw new Error("Firestore syncRuns write failed (" + res.status + "): " + (await res.text()));
+  }
+
+  // Every previously-synced Ottodot class (active or soft-deleted) with enough
+  // fields to diff against this run's data, so we can tell what actually changed.
+  async function fetchExistingSyncedDocs() {
     var token = await ensureAuth();
     var url =
       "https://firestore.googleapis.com/v1/projects/" + FIREBASE_PROJECT_ID +
@@ -116,10 +135,15 @@
       if (!row.document) return;
       var id = row.document.name.split("/").pop();
       var fields = row.document.fields || {};
-      var deletedAt = fields.deletedAt && (fields.deletedAt.doubleValue || fields.deletedAt.integerValue);
-      if (deletedAt) return; // already deleted, skip
-      var date = fields.date && fields.date.stringValue;
-      out.push({ id: id, date: date });
+      out.push({
+        id: id,
+        date: fields.date && fields.date.stringValue,
+        startTime: fields.startTime && fields.startTime.stringValue,
+        rawLabel: fields.rawLabel && fields.rawLabel.stringValue,
+        income: numField(fields, "income"),
+        durationHours: numField(fields, "durationHours"),
+        deletedAt: numField(fields, "deletedAt")
+      });
     });
     return out;
   }
@@ -225,8 +249,15 @@
           throw new Error("Couldn't find expected columns (Class Code / Date / Class Start / Class End) — the table layout may have changed.");
         }
 
+        say("Checking what's already synced…");
+        var existingList = await fetchExistingSyncedDocs();
+        var existingByDocId = {};
+        existingList.forEach(function (d) { existingByDocId[d.id] = d; });
+
         var written = 0, skipped = 0, coveredByRelief = 0, zeroDuration = 0;
         var seenDocIds = {};
+        var notSeenReason = {}; // docId -> why this run didn't include it (for removal logging)
+        var changes = [];
         // Airtable only ever shows today onward, never past sessions — track the
         // earliest date it actually returned so reconciliation below never treats
         // history (dates before this) as "removed".
@@ -244,6 +275,8 @@
           if (!rawLabel || !date || !startIso || !endIso) { skipped++; continue; }
           if (minDateSeen === null || date < minDateSeen) minDateSeen = date;
 
+          var docId = "ottodot_" + rawLabel + "_" + date;
+
           // If someone else covered this class, it's not billable to me — skip
           // writing it, and don't mark it "seen" so the reconciliation pass below
           // soft-deletes it if it was already synced (e.g. a relief teacher got
@@ -252,6 +285,7 @@
           var reliefName = reliefCell && reliefCell[0] && reliefCell[0].foreignRowDisplayName;
           if (reliefName && normalizeName(reliefName) !== normalizeName(MY_NAME)) {
             coveredByRelief++;
+            notSeenReason[docId] = "covered by a relief teacher (" + reliefName + ")";
             continue;
           }
 
@@ -264,17 +298,27 @@
           // removes it if it was already synced before the gap was noticed.
           if (durationHours <= 0) {
             zeroDuration++;
+            notSeenReason[docId] = "Airtable has no Duration set";
             continue;
           }
 
           var income = Math.round(OTTODOT_RATE * durationHours * 100) / 100;
-          var docId = "ottodot_" + rawLabel + "_" + date;
+          var startTime = localTimeFromUtcIso(startIso);
           seenDocIds[docId] = true;
+
+          var existing = existingByDocId[docId];
+          if (!existing) {
+            changes.push({ type: "added", docId: docId, rawLabel: rawLabel, date: date, income: income });
+          } else if (existing.deletedAt) {
+            changes.push({ type: "restored", docId: docId, rawLabel: rawLabel, date: date, income: income });
+          } else if (existing.income !== income || existing.durationHours !== durationHours || existing.startTime !== startTime) {
+            changes.push({ type: "updated", docId: docId, rawLabel: rawLabel, date: date, income: income, fromIncome: existing.income });
+          }
 
           await writeClassDoc(docId, {
             org: "ottodot",
             date: date,
-            startTime: localTimeFromUtcIso(startIso),
+            startTime: startTime,
             durationHours: durationHours,
             rawLabel: rawLabel,
             rate: OTTODOT_RATE,
@@ -288,6 +332,16 @@
         }
 
         say("Done. " + written + " classes synced.");
+        var addedCount = changes.filter(function (c) { return c.type === "added"; }).length;
+        var updatedCount = changes.filter(function (c) { return c.type === "updated"; }).length;
+        var restoredCount = changes.filter(function (c) { return c.type === "restored"; }).length;
+        if (addedCount || updatedCount || restoredCount) {
+          var bits = [];
+          if (addedCount) bits.push(addedCount + " new");
+          if (updatedCount) bits.push(updatedCount + " updated");
+          if (restoredCount) bits.push(restoredCount + " restored");
+          say(bits.join(", ") + ".");
+        }
         if (skipped) say(skipped + " rows skipped (missing code/date/time).");
         if (coveredByRelief) say(coveredByRelief + " classes excluded (covered by a relief teacher).");
         if (zeroDuration) say(zeroDuration + " classes skipped (Airtable has no Duration set — fix in Airtable and re-sync).");
@@ -298,21 +352,38 @@
           if (minDateSeen === null) {
             say("Skipped removal check (no rows read, so nothing to compare against).");
           } else {
-            var activeSynced = await fetchActiveSyncedDocs();
-            for (var ai = 0; ai < activeSynced.length; ai++) {
-              var doc = activeSynced[ai];
+            for (var ai = 0; ai < existingList.length; ai++) {
+              var doc = existingList[ai];
+              if (doc.deletedAt) continue; // already inactive
               // Never touch history: Airtable itself never shows dates before
               // minDateSeen, so a missing doc there just means it's in the past,
               // not that it was removed.
               if (!doc.date || doc.date < minDateSeen) continue;
               if (seenDocIds[doc.id]) continue;
               await writeClassDoc(doc.id, { deletedAt: Date.now() });
+              changes.push({ type: "removed", docId: doc.id, rawLabel: doc.rawLabel, date: doc.date, income: doc.income, reason: notSeenReason[doc.id] || "no longer in Airtable" });
               removed++;
             }
             say(removed + " classes removed (no longer in Airtable).");
           }
         } catch (e) {
           say("Warning: couldn't check for removed classes: " + e.message);
+        }
+
+        try {
+          await writeSyncRun({
+            org: "ottodot",
+            runAt: Date.now(),
+            totalRows: table.rows.length,
+            written: written,
+            skipped: skipped,
+            coveredByRelief: coveredByRelief,
+            zeroDuration: zeroDuration,
+            removed: removed,
+            changes: changes
+          });
+        } catch (e) {
+          say("Warning: couldn't save sync log: " + e.message);
         }
       } catch (err) {
         say("Error: " + err.message);
