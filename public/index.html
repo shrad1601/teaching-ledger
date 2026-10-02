@@ -852,7 +852,14 @@
       if (!s.active) return;
       var wIdx = WEEKDAY_NAMES.indexOf(s.weekday);
       if (wIdx < 0) return;
-      var seriesHorizon = (s.endDate && s.endDate < horizon) ? s.endDate : horizon;
+      // Always show at least ~12 weeks of occurrences from the series' own
+      // start date, even if that start is further out than today's rolling
+      // window — otherwise a class scheduled to start months from now only
+      // ever gets its single literal start date, with no visible "weekly"
+      // pattern until today eventually catches up to it.
+      var effectiveHorizon = addDays(s.startDate, 84);
+      if (horizon > effectiveHorizon) effectiveHorizon = horizon;
+      var seriesHorizon = (s.endDate && s.endDate < effectiveHorizon) ? s.endDate : effectiveHorizon;
       var cursor = s.startDate;
       var cIdx = weekdayIdx(cursor);
       var diff = (wIdx - cIdx + 7) % 7;
