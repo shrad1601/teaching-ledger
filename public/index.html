@@ -840,11 +840,12 @@
 
   // ---------------- recurring materialization ----------------
   var materializing = false;
+  var MATERIALIZE_HORIZON_DAYS = 365; // how far ahead manual recurring series get pre-generated
   function maybeMaterialize(){
     if (!classesLoaded || !seriesLoaded || !customOrgsLoaded || materializing || !db) return;
     materializing = true;
     var today = todayStr();
-    var horizon = addDays(today, 84);
+    var horizon = addDays(today, MATERIALIZE_HORIZON_DAYS);
     var existingKeys = {};
     classes.forEach(function(c){ if (c.seriesId) existingKeys[c.seriesId+"|"+c.date] = true; });
 
@@ -853,12 +854,12 @@
       if (!s.active) return;
       var wIdx = WEEKDAY_NAMES.indexOf(s.weekday);
       if (wIdx < 0) return;
-      // Always show at least ~12 weeks of occurrences from the series' own
+      // Always show at least a year of occurrences from the series' own
       // start date, even if that start is further out than today's rolling
       // window — otherwise a class scheduled to start months from now only
       // ever gets its single literal start date, with no visible "weekly"
       // pattern until today eventually catches up to it.
-      var effectiveHorizon = addDays(s.startDate, 84);
+      var effectiveHorizon = addDays(s.startDate, MATERIALIZE_HORIZON_DAYS);
       if (horizon > effectiveHorizon) effectiveHorizon = horizon;
       var seriesHorizon = (s.endDate && s.endDate < effectiveHorizon) ? s.endDate : effectiveHorizon;
       var cursor = s.startDate;
