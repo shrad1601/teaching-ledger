@@ -272,6 +272,8 @@
   }
   .quickbtn .swatch{ width:20px; height:20px; border-radius:7px; box-shadow:0 0 10px currentColor; }
   .quickbtn:active{ transform:translateY(1px); }
+  .quickbtn.new{ background:transparent; border:1.5px dashed var(--line); color:var(--ink-soft); }
+  .quickbtn.new .swatch{ display:flex; align-items:center; justify-content:center; background:transparent; box-shadow:none; color:var(--ink-soft); font-size:16px; font-weight:700; }
 
   /* ---- forms ---- */
   .field{ display:flex; flex-direction:column; gap:6px; margin-bottom:14px; }
@@ -646,6 +648,26 @@
   };
   var ORG_ORDER = ["mindstretcher","ottodot","mastermaths","bluetree","primeplus"];
 
+  // ---------------- user-added tuition centres ----------------
+  // Flat-hourly-rate organisations added at runtime, stored in the "orgs" collection.
+  // Looked up alongside the built-in ORG_META/ORG_ORDER everywhere an org is rendered.
+  function findCustomOrg(id){
+    return customOrgs.find(function(o){ return o.id===id; }) || null;
+  }
+  function orgMeta(key){
+    if (ORG_META[key]) return ORG_META[key];
+    var c = findCustomOrg(key);
+    if (c) return { label: c.label, color: c.color };
+    return { label: key, color: "var(--ink-soft)" };
+  }
+  function allOrgKeys(){
+    return ORG_ORDER.concat(customOrgs.map(function(o){ return o.id; }));
+  }
+  var NEW_ORG_PALETTE = ["#7C8FD6","#C97A46","#3F9E8F","#3F8FB0","#B08A3A","#B679DE","#5A9E6F","#C45C6A"];
+  function nextOrgColor(){
+    return NEW_ORG_PALETTE[customOrgs.length % NEW_ORG_PALETTE.length];
+  }
+
   // ---------------- org colors (customizable) ----------------
   var DEFAULT_ORG_COLORS = {
     mindstretcher:"#5A6FC4", ottodot:"#C97A46", mastermaths:"#3F9E8F", bluetree:"#3F8FB0", primeplus:"#B08A3A"
@@ -765,6 +787,9 @@
   var detailEditMode = false;  // is the detail modal showing the edit form
   var syncRuns = [];           // recent sync script runs, newest first
   var syncRunsLoaded = false;
+  var customOrgs = [];         // user-added tuition centres, oldest first
+  var customOrgsLoaded = false;
+  var editingOrgId = null;     // which custom org is being edited in Settings
 
   var mainEl = document.getElementById("main");
   var sectionLabelEl = document.getElementById("sectionLabel");
@@ -802,6 +827,12 @@
       syncRunsLoaded = true;
       renderAll();
     }, function(err){ console.error("syncRuns onSnapshot", err); });
+
+    db.collection("orgs").orderBy("createdAt","asc").onSnapshot(function(snap){
+      customOrgs = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); });
+      customOrgsLoaded = true;
+      renderAll();
+    }, function(err){ console.error("orgs onSnapshot", err); });
   }
 
   function activeClasses(){ return classes.filter(function(c){ return !c.deletedAt; }); }
@@ -877,6 +908,9 @@
       rate = 35;
     } else if (org === "mindstretcher"){
       rate = mindstretcherRate(fields.level, isWeekendDate(fields.date || fields.startDate), fields.studentCount);
+    } else {
+      var custom = findCustomOrg(org);
+      if (custom) rate = custom.rate;
     }
     return { rate: rate, income: Math.round(rate*dur*100)/100 };
   }
@@ -942,6 +976,27 @@
     }
   }
 
+  async function addCustomOrg(label, rate, color){
+    if (!db) return null;
+    var doc = { label: label, rate: rate, color: color, createdAt: Date.now() };
+    var ref = await db.collection("orgs").add(doc);
+    // Render instantly rather than waiting on the snapshot round-trip.
+    if (!findCustomOrg(ref.id)) customOrgs.push(Object.assign({id:ref.id}, doc));
+    return ref.id;
+  }
+  async function updateCustomOrg(id, label, rate, color){
+    if (!db) return;
+    await db.collection("orgs").doc(id).update({ label: label, rate: rate, color: color });
+  }
+  async function deleteCustomOrg(id){
+    if (!db) return;
+    await db.collection("orgs").doc(id).delete();
+    showToast("Centre removed", false);
+  }
+  function orgClassCount(id){
+    return classes.filter(function(c){ return c.org===id; }).length;
+  }
+
   function showToast(msg, offerUndo){
     var t = document.getElementById("toast");
     document.getElementById("toastMsg").textContent = msg;
@@ -964,8 +1019,38 @@
     else if (currentTab === "settings") renderSettings();
   }
 
+  function renderCustomOrgEditRow(o){
+    return '<div class="settings-row" style="flex-direction:column;align-items:stretch;gap:8px;">'+
+      '<div class="field" style="margin-bottom:0;"><label>Name</label><input type="text" id="editOrgLabel_'+o.id+'" value="'+attrEscape(o.label)+'"></div>'+
+      '<div class="field" style="margin-bottom:0;"><label>Hourly rate ($)</label><input type="number" id="editOrgRate_'+o.id+'" min="0" step="0.5" value="'+o.rate+'"></div>'+
+      '<div class="field" style="margin-bottom:0;"><label>Colour</label><input type="color" class="color-input" id="editOrgColor_'+o.id+'" value="'+o.color+'"></div>'+
+      '<div style="display:flex;gap:8px;">'+
+        '<button class="icon-btn" data-cancel-org-edit="'+o.id+'" style="flex:1;border:1px solid var(--line);border-radius:12px;padding:9px;">Cancel</button>'+
+        '<button class="icon-btn" data-save-org-edit="'+o.id+'" style="flex:1;border:1px solid var(--line);border-radius:12px;padding:9px;">Save</button>'+
+      '</div>'+
+    '</div>';
+  }
+  function renderCustomOrgsSection(){
+    var rows = customOrgs.map(function(o){
+      if (editingOrgId === o.id) return renderCustomOrgEditRow(o);
+      var count = orgClassCount(o.id);
+      return '<div class="settings-row">'+
+        '<div class="settings-label"><span class="dot swatch-dot" style="background:'+o.color+'"></span>'+o.label+
+          ' <span class="mono" style="color:var(--ink-soft);font-size:11px;">'+fmtMoney(o.rate)+'/h</span></div>'+
+        '<div style="display:flex;align-items:center;gap:10px;">'+
+          '<button class="icon-btn" data-edit-org="'+o.id+'">Edit</button>'+
+          (count
+            ? '<span class="mono" style="font-size:11px;color:var(--ink-soft);">'+count+' class'+(count===1?"":"es")+'</span>'
+            : '<button class="icon-btn danger" data-delete-org="'+o.id+'">Delete</button>')+
+        '</div>'+
+      '</div>';
+    }).join("");
+    if (!rows) rows = '<div class="empty-note">No custom centres yet — add one from the Add tab.</div>';
+    return '<div class="card"><h2>Your tuition centres</h2>'+rows+'</div>';
+  }
+
   function renderSettings(){
-    sectionLabelEl.textContent = "Customize colors";
+    sectionLabelEl.textContent = "Settings";
     var rows = ORG_ORDER.map(function(org){
       var meta = ORG_META[org];
       var hex = orgColors[org];
@@ -979,9 +1064,10 @@
       '<div class="card"><h2>Organisation colours</h2>'+
         rows+
         '<button id="resetColorsBtn" style="margin-top:16px;width:100%;background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:999px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;">Reset to defaults</button>'+
-      '</div>';
+      '</div>'+
+      renderCustomOrgsSection();
     document.getElementById("settingsBack").addEventListener("click", function(){ setTab("dashboard"); });
-    mainEl.querySelectorAll(".color-input").forEach(function(inp){
+    mainEl.querySelectorAll(".color-input[data-org]").forEach(function(inp){
       inp.addEventListener("input", function(){
         saveOrgColor(inp.getAttribute("data-org"), inp.value);
         var dot = inp.closest(".settings-row").querySelector(".swatch-dot");
@@ -989,6 +1075,36 @@
       });
     });
     document.getElementById("resetColorsBtn").addEventListener("click", resetOrgColors);
+
+    mainEl.querySelectorAll("[data-edit-org]").forEach(function(btn){
+      btn.addEventListener("click", function(){ editingOrgId = btn.getAttribute("data-edit-org"); renderSettings(); });
+    });
+    mainEl.querySelectorAll("[data-cancel-org-edit]").forEach(function(btn){
+      btn.addEventListener("click", function(){ editingOrgId = null; renderSettings(); });
+    });
+    mainEl.querySelectorAll("[data-delete-org]").forEach(function(btn){
+      btn.addEventListener("click", function(){ deleteCustomOrg(btn.getAttribute("data-delete-org")); });
+    });
+    mainEl.querySelectorAll("[data-save-org-edit]").forEach(function(btn){
+      btn.addEventListener("click", async function(){
+        var id = btn.getAttribute("data-save-org-edit");
+        var label = document.getElementById("editOrgLabel_"+id).value.trim();
+        var rate = Number(document.getElementById("editOrgRate_"+id).value);
+        var color = document.getElementById("editOrgColor_"+id).value;
+        if (!label || !(rate > 0)){ showToast("Enter a name and a rate above $0", false); return; }
+        btn.disabled = true;
+        try{
+          await updateCustomOrg(id, label, rate, color);
+          editingOrgId = null;
+          renderSettings();
+          showToast("Centre updated", false);
+        }catch(e){
+          console.error(e);
+          btn.disabled = false;
+          showToast("Couldn't save — try again", false);
+        }
+      });
+    });
   }
 
   function periodTotals(range){
@@ -1004,7 +1120,7 @@
   function orgBreakdown(range){
     var today = todayStr();
     var map = {};
-    ORG_ORDER.forEach(function(o){ map[o] = {earned:0, projected:0}; });
+    allOrgKeys().forEach(function(o){ map[o] = {earned:0, projected:0}; });
     activeClasses().forEach(function(c){
       if (c.date < range[0] || c.date > range[1]) return;
       if (!map[c.org]) map[c.org] = {earned:0, projected:0};
@@ -1037,11 +1153,11 @@
 
     var rangeForBreakdown = breakdownPeriod==="today" ? todayRange : breakdownPeriod==="week" ? weekRange : monthRangeArr;
     var bd = orgBreakdown(rangeForBreakdown);
-    var rowsHtml = ORG_ORDER.map(function(org){
+    var rowsHtml = allOrgKeys().map(function(org){
       var v = bd[org] || {earned:0, projected:0};
       var combined = v.earned + v.projected;
       if (combined === 0) return "";
-      var meta = ORG_META[org];
+      var meta = orgMeta(org);
       return '<div class="breakdown-row">'+
         '<div class="org"><span class="dot" style="background:'+meta.color+'"></span>'+meta.label+'</div>'+
         '<div class="amounts"><div class="combined mono">'+fmtMoney(combined)+'</div>'+
@@ -1058,6 +1174,7 @@
           quickBtn("mastermaths","Mastermaths")+
           quickBtn("bluetree","Bluetree")+
           quickBtn("primeplus","PrimePlus")+
+          customOrgs.map(function(o){ return quickBtn(o.id, o.label); }).join("")+
         '</div>'+
       '</div>'+
       '<div class="card">'+
@@ -1077,7 +1194,8 @@
   }
 
   function quickBtn(org, label){
-    return '<button class="quickbtn" data-quick="'+org+'"><span class="swatch" style="background:'+ORG_META[org].color+';color:'+ORG_META[org].color+'"></span>'+label+'</button>';
+    var color = orgMeta(org).color;
+    return '<button class="quickbtn" data-quick="'+org+'"><span class="swatch" style="background:'+color+';color:'+color+'"></span>'+label+'</button>';
   }
   function segBtn(key, label){
     return '<button data-seg="'+key+'" class="'+(breakdownPeriod===key?"active":"")+'">'+label+'</button>';
@@ -1093,8 +1211,10 @@
             quickBtn("mastermaths","Mastermaths")+
             quickBtn("bluetree","Bluetree")+
             quickBtn("primeplus","PrimePlus")+
+            customOrgs.map(function(o){ return quickBtn(o.id, o.label); }).join("")+
             quickBtn("mindstretcher","Mind Stretcher")+
             quickBtn("ottodot","Ottodot")+
+            '<button class="quickbtn new" data-quick="__new__"><span class="swatch">+</span>New centre</button>'+
           '</div>'+
         '</div>'+
         '<div class="comingsoon">Mind Stretcher &amp; Ottodot are usually synced in automatically — use manual entry here only to fix a gap the sync missed.</div>';
@@ -1103,6 +1223,7 @@
       });
       return;
     }
+    if (addOrg === "__new__"){ renderNewOrgForm(); return; }
     var org = addOrg;
     var today = todayStr();
     var needsLevelChoice = org === "bluetree" || org === "mindstretcher";
@@ -1133,7 +1254,7 @@
     mainEl.innerHTML =
       '<button class="back-link" id="backBtn">← Choose a different organisation</button>'+
       '<div class="card">'+
-        '<h2 style="color:'+ORG_META[org].color+'">'+ORG_META[org].label+'</h2>'+
+        '<h2 style="color:'+orgMeta(org).color+'">'+orgMeta(org).label+'</h2>'+
         '<div class="field"><label>Date</label><input type="date" id="fDate" value="'+today+'"></div>'+
         '<div class="field"><label>Start time</label><input type="time" id="fTime" value="16:00"></div>'+
         '<div class="field"><label>Duration (hours)</label><input type="number" id="fDuration" min="0.25" step="0.25" value="1"></div>'+
@@ -1224,15 +1345,50 @@
     updatePreview();
   }
 
+  function renderNewOrgForm(){
+    var defaultColor = nextOrgColor();
+    mainEl.innerHTML =
+      '<button class="back-link" id="backBtn">← Choose a different organisation</button>'+
+      '<div class="card">'+
+        '<h2>New tuition centre</h2>'+
+        '<div class="field"><label>Name</label><input type="text" id="newOrgLabel" placeholder="e.g. Learning Loft" autofocus></div>'+
+        '<div class="field"><label>Hourly rate ($)</label><input type="number" id="newOrgRate" min="0" step="0.5" value="40"></div>'+
+        '<div class="field"><label>Colour</label><input type="color" class="color-input" id="newOrgColor" value="'+defaultColor+'"></div>'+
+        '<button class="save-btn" id="newOrgSaveBtn">Add centre</button>'+
+      '</div>';
+    document.getElementById("backBtn").addEventListener("click", function(){ addOrg=null; renderAdd(); });
+    document.getElementById("newOrgSaveBtn").addEventListener("click", async function(){
+      var label = document.getElementById("newOrgLabel").value.trim();
+      var rate = Number(document.getElementById("newOrgRate").value);
+      var color = document.getElementById("newOrgColor").value;
+      if (!label){ showToast("Give the centre a name", false); return; }
+      if (!(rate > 0)){ showToast("Enter an hourly rate above $0", false); return; }
+      this.disabled = true;
+      this.textContent = "Adding…";
+      try{
+        var newId = await addCustomOrg(label, rate, color);
+        showToast("Centre added", false);
+        addOrg = newId;
+        renderAdd();
+      }catch(e){
+        console.error(e);
+        this.disabled = false;
+        this.textContent = "Add centre";
+        showToast("Couldn't add — try again", false);
+      }
+    });
+  }
+
   // ---- History ----
   function renderHistory(){
     sectionLabelEl.textContent = "History";
 
     var chips = '<div class="filter-row">' +
       '<button class="chip '+(historyOrgFilter==="all"?"active":"")+'" data-org="all">All</button>' +
-      ORG_ORDER.map(function(o){
+      allOrgKeys().map(function(o){
+        var meta = orgMeta(o);
         return '<button class="chip '+(historyOrgFilter===o?"active":"")+'" data-org="'+o+'">'+
-          '<span class="dot" style="background:'+ORG_META[o].color+'"></span>'+ORG_META[o].label+'</button>';
+          '<span class="dot" style="background:'+meta.color+'"></span>'+meta.label+'</button>';
       }).join("") +
     '</div>';
 
@@ -1321,7 +1477,7 @@
     '</div>';
   }
   function renderSyncRunCard(run){
-    var meta = ORG_META[run.org] || {label:run.org, color:"var(--ink-soft)"};
+    var meta = orgMeta(run.org);
     var changes = run.changes || [];
     var counts = { added:0, updated:0, restored:0, removed:0 };
     changes.forEach(function(ch){ if (counts[ch.type] != null) counts[ch.type]++; });
@@ -1394,7 +1550,7 @@
         if (!dateStr) return '<div class="cal-cell empty"></div>';
         var dayList = byDate[dateStr] || [];
         var chips = dayList.slice(0,3).map(function(c){
-          var meta = ORG_META[c.org] || {color:"var(--ink-soft)"};
+          var meta = orgMeta(c.org);
           return '<span class="cal-chip" data-detailchip="'+c.id+'" style="background:'+meta.color+'">'+formatTime12h(c.startTime)+'</span>';
         }).join("");
         var more = dayList.length>3 ? '<span class="cal-chip-more">+'+(dayList.length-3)+' more</span>' : "";
@@ -1432,7 +1588,7 @@
   function renderClassItem(c){
     var today = todayStr();
     var isFuture = c.date > today;
-    var meta = ORG_META[c.org] || {label:c.org, color:"var(--ink-soft)"};
+    var meta = orgMeta(c.org);
     var subBits = [];
     var typeLabel = classTypeLabel(c);
     if (typeLabel) subBits.push(typeLabel);
@@ -1464,7 +1620,7 @@
   };
   function detailRows(c){
     var rows = [];
-    var meta = ORG_META[c.org] || {label:c.org};
+    var meta = orgMeta(c.org);
     rows.push(["Organisation", meta.label]);
     rows.push(["Date", fmtDate(c.date)]);
     if (c.startTime) rows.push(["Start time", formatTime12h(c.startTime)]);
@@ -1620,7 +1776,7 @@
     if (!detailClassId) return;
     var c = classes.find(function(cc){ return cc.id===detailClassId; });
     if (!c){ detailClassId = null; return; }
-    var meta = ORG_META[c.org] || {label:c.org, color:"var(--ink-soft)"};
+    var meta = orgMeta(c.org);
     var overlay = document.createElement("div");
     overlay.id = "detailOverlay";
     overlay.className = "modal-overlay";
@@ -1659,7 +1815,7 @@
     sectionLabelEl.textContent = "Trash";
     var list = classes.filter(function(c){ return c.deletedAt; }).sort(function(a,b){ return b.deletedAt - a.deletedAt; });
     var itemsHtml = list.map(function(c){
-      var meta = ORG_META[c.org] || {label:c.org, color:"var(--ink-soft)"};
+      var meta = orgMeta(c.org);
       return '<div class="class-item">'+
         '<div class="left">'+
           '<div class="top-line"><span class="dot" style="background:'+meta.color+'"></span>'+meta.label+'</div>'+
