@@ -831,6 +831,7 @@
     db.collection("orgs").orderBy("createdAt","asc").onSnapshot(function(snap){
       customOrgs = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); });
       customOrgsLoaded = true;
+      maybeMaterialize();
       renderAll();
     }, function(err){ console.error("orgs onSnapshot", err); });
   }
@@ -840,7 +841,7 @@
   // ---------------- recurring materialization ----------------
   var materializing = false;
   function maybeMaterialize(){
-    if (!classesLoaded || !seriesLoaded || materializing || !db) return;
+    if (!classesLoaded || !seriesLoaded || !customOrgsLoaded || materializing || !db) return;
     materializing = true;
     var today = todayStr();
     var horizon = addDays(today, 84);
