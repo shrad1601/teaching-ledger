@@ -777,6 +777,7 @@
   var currentTab = "dashboard";
   var addOrg = null;           // which org's add-form is showing
   var breakdownPeriod = "month"; // today | week | month
+  var breakdownMonth = todayStr().slice(0,7); // which month the breakdown shows when period is "month"
   var historyOrgFilter = "all";
   var historyView = "list";    // list | calendar
   var calendarMonth = todayStr().slice(0,7);
@@ -1116,11 +1117,12 @@
     });
   }
 
-  function periodTotals(range){
+  function periodTotals(range, orgFilter){
     var today = todayStr();
     var earned = 0, projected = 0;
     activeClasses().forEach(function(c){
       if (c.date < range[0] || c.date > range[1]) return;
+      if (orgFilter && orgFilter !== "all" && c.org !== orgFilter) return;
       if (c.date <= today) earned += c.income; else projected += c.income;
     });
     return { earned:earned, projected:projected, combined:earned+projected };
@@ -1160,8 +1162,23 @@
       '</div>';
     }).join("");
 
-    var rangeForBreakdown = breakdownPeriod==="today" ? todayRange : breakdownPeriod==="week" ? weekRange : monthRangeArr;
+    var breakdownMonthRange = monthRange(breakdownMonth+"-01");
+    var rangeForBreakdown = breakdownPeriod==="today" ? todayRange : breakdownPeriod==="week" ? weekRange : breakdownMonthRange;
     var bd = orgBreakdown(rangeForBreakdown);
+
+    var monthNavHtml = "";
+    if (breakdownPeriod === "month"){
+      var ymParts = breakdownMonth.split("-").map(Number);
+      var monthLabel = new Date(ymParts[0], ymParts[1]-1, 1).toLocaleDateString("en-SG",{month:"long", year:"numeric"});
+      var bTotals = periodTotals(breakdownMonthRange);
+      monthNavHtml =
+        '<div class="cal-nav" style="margin-bottom:2px;">'+
+          '<button class="icon-btn" id="bdPrev" aria-label="Previous month">‹</button>'+
+          '<div class="cal-month display">'+monthLabel+'</div>'+
+          '<button class="icon-btn" id="bdNext" aria-label="Next month">›</button>'+
+        '</div>'+
+        '<div class="cal-summary">Total <span class="mono">'+fmtMoney(bTotals.combined)+'</span> — '+fmtMoney(bTotals.earned)+' earned · '+fmtMoney(bTotals.projected)+' projected</div>';
+    }
     var rowsHtml = allOrgKeys().map(function(org){
       var v = bd[org] || {earned:0, projected:0};
       var combined = v.earned + v.projected;
@@ -1191,6 +1208,7 @@
         '<div class="seg" style="margin-bottom:12px;">'+
           segBtn("today","Today")+segBtn("week","Week")+segBtn("month","Month")+
         '</div>'+
+        monthNavHtml+
         rowsHtml+
       '</div>';
 
@@ -1200,6 +1218,9 @@
     mainEl.querySelectorAll("[data-seg]").forEach(function(btn){
       btn.addEventListener("click", function(){ breakdownPeriod = btn.getAttribute("data-seg"); renderDashboard(); });
     });
+    var bdPrev = document.getElementById("bdPrev"), bdNext = document.getElementById("bdNext");
+    if (bdPrev) bdPrev.addEventListener("click", function(){ breakdownMonth = shiftMonth(breakdownMonth,-1); renderDashboard(); });
+    if (bdNext) bdNext.addEventListener("click", function(){ breakdownMonth = shiftMonth(breakdownMonth,1); renderDashboard(); });
   }
 
   function quickBtn(org, label){
@@ -1570,7 +1591,7 @@
     }).join("");
 
     var monthR = monthRange(calendarMonth+"-01");
-    var mTotals = periodTotals(monthR);
+    var mTotals = periodTotals(monthR, historyOrgFilter);
 
     var panelHtml = "";
     if (calendarSelected && calendarSelected.slice(0,7)===calendarMonth){
@@ -1588,7 +1609,7 @@
         '<div class="cal-month display">'+monthLabel+'</div>' +
         '<button class="icon-btn" id="calNext">›</button>' +
       '</div>' +
-      '<div class="cal-summary">Month combined <span class="mono">'+fmtMoney(mTotals.combined)+'</span> — '+fmtMoney(mTotals.earned)+' earned · '+fmtMoney(mTotals.projected)+' projected</div>' +
+      '<div class="cal-summary">'+(historyOrgFilter==="all" ? "Month combined" : orgMeta(historyOrgFilter).label+" this month")+' <span class="mono">'+fmtMoney(mTotals.combined)+'</span> — '+fmtMoney(mTotals.earned)+' earned · '+fmtMoney(mTotals.projected)+' projected</div>' +
       '<div class="cal-grid">'+headerRow+cellsHtml+'</div>' +
       panelHtml +
     '</div>';
