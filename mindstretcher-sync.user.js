@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mind Stretcher -> Teaching Ledger Sync
 // @namespace    shraddha-teaching-ledger
-// @version      1.2
+// @version      1.3
 // @description  Reads your Dash schedule + attendance and writes classes straight into your Teaching Ledger (Firestore). No copy-paste.
 // @match        https://dash.mindstretcher.com/teacher/my-schedule/*
 // @grant        none
@@ -263,7 +263,33 @@
     return { total: total, makeupCount: makeupCount };
   }
 
+  // ---------------- scan window ----------------
+  var WEEKS_AHEAD_KEY = "tl-ms-weeks-ahead";
+  var DEFAULT_WEEKS_AHEAD = 12;
+  var MAX_WEEKS_AHEAD = 52;
+  function clampWeeksAhead(v) {
+    var n = parseInt(v, 10);
+    if (!(n >= 1)) n = DEFAULT_WEEKS_AHEAD;
+    return Math.min(n, MAX_WEEKS_AHEAD);
+  }
+  function loadWeeksAhead() {
+    try { return clampWeeksAhead(localStorage.getItem(WEEKS_AHEAD_KEY)); } catch (e) { return DEFAULT_WEEKS_AHEAD; }
+  }
+  function saveWeeksAhead(n) {
+    try { localStorage.setItem(WEEKS_AHEAD_KEY, String(n)); } catch (e) {}
+  }
+  // "quick" = this week onwards; "full" = also re-checks all of last month.
+  function buildScanWindow(today, mode, weeksAhead) {
+    var startMonday = mode === "quick" ? mondayOnOrBefore(today) : mondayOnOrBefore(firstOfPrevMonth(today));
+    var horizon = addDaysToDateStr(today, weeksAhead * 7);
+    var weeks = [];
+    for (var w = startMonday; w <= horizon; w = addDaysToDateStr(w, 7)) weeks.push(w);
+    return { startMonday: startMonday, scanEnd: addDaysToDateStr(weeks[weeks.length - 1], 6), weeks: weeks };
+  }
+
   // ---------------- UI ----------------
+  var QUICK_LABEL = "Quick sync (this week onwards)";
+  var FULL_LABEL = "Full sync (incl. last month)";
   function makeUi() {
     var box = document.createElement("div");
     box.style.cssText =
@@ -271,20 +297,37 @@
       "font-family:sans-serif;border-radius:12px;padding:14px 16px;box-shadow:0 8px 24px rgba(0,0,0,.3);width:280px;";
     box.innerHTML =
       '<div style="font-weight:700;margin-bottom:8px;">Teaching Ledger Sync</div>' +
-      '<button id="tl-sync-btn" style="width:100%;padding:10px;border:none;border-radius:8px;background:#7C3FA0;color:#fff;font-weight:700;cursor:pointer;">Sync to Ledger</button>' +
+      '<label style="display:flex;align-items:center;justify-content:space-between;font-size:12px;margin-bottom:8px;">Weeks ahead (1–' + MAX_WEEKS_AHEAD + ')' +
+        '<input id="tl-weeks" type="number" min="1" max="' + MAX_WEEKS_AHEAD + '" step="1" style="width:64px;padding:4px 6px;border:none;border-radius:6px;"></label>' +
+      '<button id="tl-quick-btn" style="width:100%;padding:10px;border:none;border-radius:8px;background:#7C3FA0;color:#fff;font-weight:700;cursor:pointer;margin-bottom:6px;">' + QUICK_LABEL + '</button>' +
+      '<button id="tl-sync-btn" style="width:100%;padding:8px;border:1px solid #7C3FA0;border-radius:8px;background:transparent;color:#fff;font-weight:600;cursor:pointer;">' + FULL_LABEL + '</button>' +
       '<div id="tl-sync-status" style="margin-top:8px;font-size:12px;opacity:.85;white-space:pre-wrap;max-height:160px;overflow-y:auto;"></div>';
     document.body.appendChild(box);
     return {
+      quickButton: box.querySelector("#tl-quick-btn"),
       button: box.querySelector("#tl-sync-btn"),
+      weeks: box.querySelector("#tl-weeks"),
       status: box.querySelector("#tl-sync-status")
     };
   }
 
   function run() {
     var ui = makeUi();
-    ui.button.addEventListener("click", async function () {
-      ui.button.disabled = true;
-      ui.button.textContent = "Syncing…";
+    ui.weeks.value = loadWeeksAhead();
+
+    function setBusy(busy, mode) {
+      ui.quickButton.disabled = busy;
+      ui.button.disabled = busy;
+      ui.weeks.disabled = busy;
+      ui.quickButton.textContent = busy && mode === "quick" ? "Syncing…" : QUICK_LABEL;
+      ui.button.textContent = busy && mode === "full" ? "Syncing…" : FULL_LABEL;
+    }
+
+    async function runSync(mode) {
+      var weeksAhead = clampWeeksAhead(ui.weeks.value);
+      ui.weeks.value = weeksAhead;
+      saveWeeksAhead(weeksAhead);
+      setBusy(true, mode);
       var log = [];
       function say(msg) {
         log.push(msg);
@@ -295,11 +338,11 @@
         await ensureAuth();
         say("Signed in.");
 
-        var today = todayStr();
-        var startMonday = mondayOnOrBefore(firstOfPrevMonth(today)); // always covers all of last month
-        var horizon = addDaysToDateStr(today, 84); // 12 weeks forward
-        var weeks = [];
-        for (var w = startMonday; w <= horizon; w = addDaysToDateStr(w, 7)) weeks.push(w);
+        var scan = buildScanWindow(todayStr(), mode, weeksAhead);
+        var startMonday = scan.startMonday;
+        var scanEnd = scan.scanEnd;
+        var weeks = scan.weeks;
+        say((mode === "quick" ? "Quick sync: " : "Full sync: ") + weeks.length + " weeks from " + startMonday + ".");
 
         say("Checking what's already synced…");
         var existingList = await fetchExistingSyncedDocs();
@@ -387,7 +430,7 @@
             var doc = existingList[ai];
             if (doc.deletedAt) continue; // already inactive
             // Only touch docs inside the window we just scanned; leave older history alone.
-            if (!doc.date || doc.date < startMonday || doc.date > horizon) continue;
+            if (!doc.date || doc.date < startMonday || doc.date > scanEnd) continue;
             if (seenDocIds[doc.id]) continue;
             await writeClassDoc(doc.id, { deletedAt: Date.now() });
             changes.push({ type: "removed", docId: doc.id, classLabel: doc.classLabel, date: doc.date, income: doc.income, reason: "no longer on Dash" });
@@ -402,6 +445,8 @@
           await writeSyncRun({
             org: "mindstretcher",
             runAt: Date.now(),
+            mode: mode,
+            weeksAhead: weeksAhead,
             written: written,
             skippedUnknownLevel: skippedUnknownLevel.length,
             skippedNoAttendance: skippedNoAttendance,
@@ -415,10 +460,12 @@
         say("Error: " + err.message);
         console.error(err);
       } finally {
-        ui.button.disabled = false;
-        ui.button.textContent = "Sync to Ledger";
+        setBusy(false);
       }
-    });
+    }
+
+    ui.quickButton.addEventListener("click", function () { runSync("quick"); });
+    ui.button.addEventListener("click", function () { runSync("full"); });
   }
 
   if (document.readyState === "loading") {
