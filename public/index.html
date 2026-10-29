@@ -493,6 +493,27 @@
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
   .cal-chip-more{ font-size:7.5px; color:var(--ink-soft); text-align:center; font-weight:600; }
+  .wk-days{ display:flex; flex-direction:column; gap:6px; }
+  .wk-day{ border:1px solid var(--line); border-radius:14px; padding:9px 12px; background:var(--surface-2); }
+  .wk-day.is-today{ border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-glow); }
+  .wk-day.is-free{ background:transparent; padding:7px 12px; }
+  .wk-day.is-free .wk-name, .wk-day.is-free .wk-total{ color:var(--ink-soft); font-weight:600; }
+  .wk-head{ display:flex; justify-content:space-between; align-items:center; font-size:12.5px; font-weight:700; }
+  .wk-total{ font-size:12.5px; }
+  .wk-today-tag{ font-size:9.5px; text-transform:uppercase; letter-spacing:0.06em; color:var(--accent); margin-left:4px; }
+  .wk-class{
+    display:grid; grid-template-columns:56px minmax(0,1fr) auto auto; align-items:center; gap:8px;
+    width:100%; margin-top:7px; padding:7px 0 0; border:none; border-top:1px solid var(--line);
+    background:none; color:var(--ink); font:inherit; font-size:12.5px; text-align:left; cursor:pointer;
+  }
+  .wk-time{ color:var(--ink-soft); font-size:11.5px; }
+  .wk-what{ display:flex; align-items:center; gap:6px; font-weight:600; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .wk-sub{ color:var(--ink-soft); font-weight:500; }
+  .wk-dur{ color:var(--ink-soft); font-size:11px; }
+  .wk-amt{ font-weight:700; font-size:12.5px; }
+  .wk-amt.past{ color:var(--accent); }
+  .wk-amt.future{ color:var(--rose); }
+  .link-btn{ border:none; background:none; padding:0; color:var(--accent); font:inherit; font-weight:700; cursor:pointer; }
   .cal-daypanel{ margin-top:16px; }
   .cal-daypanel h3{ font-size:15px; margin:0 0 10px; }
 
@@ -904,7 +925,8 @@
   var monthlyGoal = 0;         // target combined income per month (0 = not set)
   var breakdownMonth = todayStr().slice(0,7); // which month the breakdown shows when period is "month"
   var historyOrgFilter = "all";
-  var historyView = "calendar";    // list | calendar | synclog
+  var historyView = "calendar";    // list | week | calendar | synclog
+  var historyWeek = mondayOf(todayStr()); // Monday of the week the week view shows
   var calendarMonth = todayStr().slice(0,7);
   var calendarSelected = todayStr();
   var lastDeleted = null;      // {id, snapshot} for undo
@@ -1924,11 +1946,13 @@
 
     var viewToggle = '<div class="seg">' +
         '<button data-view="list" class="'+(historyView==="list"?"active":"")+'">List</button>' +
+        '<button data-view="week" class="'+(historyView==="week"?"active":"")+'">Week</button>' +
         '<button data-view="calendar" class="'+(historyView==="calendar"?"active":"")+'">Calendar</button>' +
         '<button data-view="synclog" class="'+(historyView==="synclog"?"active":"")+'">Sync Log</button>' +
       '</div>';
 
     var bodyHtml = historyView === "calendar" ? renderCalendarHtml()
+      : historyView === "week" ? renderWeekHtml()
       : historyView === "synclog" ? renderSyncLogHtml()
       : renderListHtml();
 
@@ -1952,6 +1976,16 @@
         openDetail(row.getAttribute("data-detail"));
       });
     });
+
+    if (historyView === "week"){
+      var wkPrev = document.getElementById("wkPrev"), wkNext = document.getElementById("wkNext"), wkToday = document.getElementById("wkToday");
+      if (wkPrev) wkPrev.addEventListener("click", function(){ historyWeek = addDays(historyWeek,-7); renderHistory(); });
+      if (wkNext) wkNext.addEventListener("click", function(){ historyWeek = addDays(historyWeek,7); renderHistory(); });
+      if (wkToday) wkToday.addEventListener("click", function(){ historyWeek = mondayOf(todayStr()); renderHistory(); });
+      mainEl.querySelectorAll("[data-wkclass]").forEach(function(row){
+        row.addEventListener("click", function(){ openDetail(row.getAttribute("data-wkclass")); });
+      });
+    }
 
     if (historyView === "calendar"){
       var prevBtn = document.getElementById("calPrev"), nextBtn = document.getElementById("calNext");
@@ -2057,6 +2091,61 @@
     var weeks = [];
     for (var w=0; w<cells.length; w+=7) weeks.push(cells.slice(w,w+7));
     return weeks;
+  }
+
+  // One week, Monday to Sunday, with every day's classes listed under it.
+  function renderWeekHtml(){
+    var today = todayStr();
+    var weekEnd = addDays(historyWeek, 6);
+    var inWeek = activeClasses().filter(function(c){
+      return c.date >= historyWeek && c.date <= weekEnd && (historyOrgFilter==="all" || c.org===historyOrgFilter);
+    });
+    var totals = periodTotals([historyWeek, weekEnd], historyOrgFilter);
+    var hours = inWeek.reduce(function(sum, c){ return sum + (Number(c.durationHours) || 0); }, 0);
+
+    var startD = historyWeek.split("-").map(Number), endD = weekEnd.split("-").map(Number);
+    var opts = {day:"numeric", month:"short"};
+    var weekLabel = new Date(startD[0], startD[1]-1, startD[2]).toLocaleDateString("en-SG", opts) + " – " +
+      new Date(endD[0], endD[1]-1, endD[2]).toLocaleDateString("en-SG", opts);
+    var isThisWeek = historyWeek === mondayOf(today);
+
+    var daysHtml = "";
+    for (var i = 0; i < 7; i++){
+      var d = addDays(historyWeek, i);
+      var dayList = inWeek.filter(function(c){ return c.date === d; })
+        .sort(function(a,b){ return (a.startTime||"").localeCompare(b.startTime||""); });
+      var dayTotal = dayList.reduce(function(sum, c){ return sum + (c.income || 0); }, 0);
+      var dp = d.split("-").map(Number);
+      var dayName = new Date(dp[0], dp[1]-1, dp[2]).toLocaleDateString("en-SG", {weekday:"short", day:"numeric", month:"short"});
+      var rows = dayList.map(function(c){
+        var meta = orgMeta(c.org);
+        var label = classTypeLabel(c);
+        var h = Number(c.durationHours) || 0;
+        return '<button class="wk-class" data-wkclass="'+c.id+'">'+
+          '<span class="wk-time mono">'+(formatTime12h(c.startTime) || "—")+'</span>'+
+          '<span class="wk-what"><span class="dot" style="background:'+meta.color+'"></span>'+meta.label+(label ? ' <span class="wk-sub">· '+label+'</span>' : '')+'</span>'+
+          '<span class="wk-dur mono">'+(h ? (Math.round(h*100)/100)+'h' : '')+'</span>'+
+          '<span class="wk-amt mono '+(c.date > today ? "future" : "past")+'">'+fmtMoney(c.income || 0)+'</span>'+
+        '</button>';
+      }).join("");
+      daysHtml += '<div class="wk-day'+(d===today?" is-today":"")+(dayList.length?"":" is-free")+'">'+
+        '<div class="wk-head"><span class="wk-name">'+dayName+(d===today?' <span class="wk-today-tag">Today</span>':'')+'</span>'+
+          '<span class="wk-total mono">'+(dayList.length ? fmtMoney(dayTotal) : "Free")+'</span></div>'+
+        rows+
+      '</div>';
+    }
+
+    return '<div class="card">' +
+      '<div class="cal-nav">' +
+        '<button class="icon-btn" id="wkPrev">‹</button>' +
+        '<div class="cal-month display">'+weekLabel+'</div>' +
+        '<button class="icon-btn" id="wkNext">›</button>' +
+      '</div>' +
+      '<div class="cal-summary">'+(isThisWeek ? "This week" : '<button class="link-btn" id="wkToday">Back to this week</button> ·')+
+        ' <span class="mono">'+fmtMoney(totals.combined)+'</span> — '+fmtMoney(totals.earned)+' earned · '+fmtMoney(totals.projected)+' projected · '+
+        inWeek.length+' class'+(inWeek.length===1?'':'es')+' · '+(Math.round(hours*10)/10)+' h</div>' +
+      '<div class="wk-days">'+daysHtml+'</div>' +
+    '</div>';
   }
 
   function renderCalendarHtml(){
