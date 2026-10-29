@@ -416,6 +416,16 @@
     padding:7px 13px; border-radius:999px; font-size:12px; font-weight:700; cursor:pointer; display:flex; align-items:center; gap:6px;
   }
   .chip.active{ background:var(--grad); color:var(--on-gradient); border-color:transparent; }
+  .export-periods{ flex-wrap:wrap; }
+  .export-summary{ font-size:12.5px; color:var(--ink-soft); margin:12px 0; }
+  .export-btns{ display:flex; gap:10px; }
+  .export-btn{
+    flex:1; border:none; border-radius:16px; padding:12px; cursor:pointer;
+    background:var(--grad); color:var(--on-gradient); font-size:14px; font-weight:800;
+    display:flex; flex-direction:column; align-items:center; gap:2px;
+  }
+  .export-btn small{ font-size:10.5px; font-weight:600; opacity:0.85; }
+  .export-btn:disabled{ opacity:0.45; cursor:default; }
 
   .class-list{ display:flex; flex-direction:column; gap:8px; }
   .class-item{
@@ -1028,6 +1038,7 @@
   var leaves = [];             // overseas trips {id, start, end, label, working, relief:{classId:true}}
   var leaveDraft = null;       // {start, end, label, working} typed into the trip form, kept across re-renders
   var openLeaveId = null;      // which trip's detail popup is open
+  var exportPeriod = "thisMonth"; // thisMonth | lastMonth | thisYear | lastYear | all
   var breakdownMonth = todayStr().slice(0,7); // which month the breakdown shows when period is "month"
   var historyOrgFilter = "all";
   var historyView = "calendar";    // list | week | calendar | synclog
@@ -1605,6 +1616,322 @@
     updatePreview();
   }
 
+  // ---- export: CSV / PDF of the classes in a period ----
+  var EXPORT_PERIODS = [
+    ["thisMonth", "This month"], ["lastMonth", "Last month"],
+    ["thisYear", "This year"], ["lastYear", "Last year"], ["all", "All time"]
+  ];
+  function exportRange(period){
+    var today = todayStr();
+    var year = Number(today.slice(0,4));
+    if (period === "thisMonth") return monthRange(today);
+    if (period === "lastMonth") return monthRange(addDays(monthRange(today)[0], -1));
+    if (period === "thisYear") return [year+"-01-01", year+"-12-31"];
+    if (period === "lastYear") return [(year-1)+"-01-01", (year-1)+"-12-31"];
+    var dates = activeClasses().map(function(c){ return c.date; }).sort();
+    return dates.length ? [dates[0], dates[dates.length-1]] : [today, today];
+  }
+  function exportPeriodLabel(period){
+    var range = exportRange(period);
+    if (period === "thisMonth" || period === "lastMonth") return monthLabelShort(range[0].slice(0,7));
+    if (period === "thisYear" || period === "lastYear") return range[0].slice(0,4);
+    return fmtDate(range[0])+" – "+fmtDate(range[1]);
+  }
+  function exportFileStem(period){
+    var range = exportRange(period);
+    if (period === "thisMonth" || period === "lastMonth") return "teaching-income-"+range[0].slice(0,7);
+    if (period === "thisYear" || period === "lastYear") return "teaching-income-"+range[0].slice(0,4);
+    return "teaching-income-all";
+  }
+  function exportClasses(period){
+    var range = exportRange(period);
+    return activeClasses().filter(function(c){ return c.date >= range[0] && c.date <= range[1]; })
+      .sort(function(a,b){
+        if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+        return (a.startTime || "") < (b.startTime || "") ? -1 : 1;
+      });
+  }
+  function exportClassName(c){
+    var bits = [];
+    var typeLabel = classTypeLabel(c);
+    if (typeLabel) bits.push(typeLabel);
+    if (c.category) bits.push(PRIMEPLUS_LABELS[c.category] || c.category);
+    return bits.join(" · ");
+  }
+  function exportTimeText(c){
+    var start = timeToMinutes(c.startTime);
+    if (start === null) return "";
+    var end = start + Math.round((Number(c.durationHours)||0)*60);
+    return formatTime12h(c.startTime)+"–"+formatTime12h(pad(Math.floor(end/60)%24)+":"+pad(end%60));
+  }
+  // Per-centre totals for the exported classes, biggest earner first.
+  function exportSummary(list){
+    var today = todayStr();
+    var map = {};
+    list.forEach(function(c){
+      var s = map[c.org] || (map[c.org] = { org:c.org, count:0, hours:0, earned:0, upcoming:0 });
+      s.count++;
+      s.hours += Number(c.durationHours) || 0;
+      if (c.date <= today) s.earned += c.income || 0; else s.upcoming += c.income || 0;
+    });
+    return Object.keys(map).map(function(k){ return map[k]; })
+      .sort(function(a,b){ return (b.earned+b.upcoming) - (a.earned+a.upcoming); });
+  }
+
+  function csvCell(v){
+    var s = v == null ? "" : String(v);
+    return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+  }
+  function buildCsv(period){
+    var today = todayStr();
+    var rows = [["Date","Day","Time","Hours","Centre","Class","Students","Rate ($/h)","Income ($)","Status","Month paid"]];
+    exportClasses(period).forEach(function(c){
+      rows.push([
+        c.date,
+        WEEKDAY_LABELS[weekdayIdx(c.date)],
+        exportTimeText(c),
+        Number(c.durationHours) || 0,
+        orgMeta(c.org).label,
+        exportClassName(c),
+        c.studentCount || "",
+        c.rate != null ? Number(c.rate).toFixed(2) : "",
+        Number(c.income || 0).toFixed(2),
+        c.date <= today ? "Done" : "Upcoming",
+        isPaid(c.org, c.date.slice(0,7)) ? "Yes" : "No"
+      ]);
+    });
+    // BOM so Excel reads it as UTF-8.
+    return "﻿" + rows.map(function(r){ return r.map(csvCell).join(","); }).join("\r\n") + "\r\n";
+  }
+
+  // jsPDF is only needed for the PDF, so it's fetched on demand (and preloaded when Settings opens).
+  var pdfLibPromise = null;
+  function loadScript(src){
+    return new Promise(function(resolve, reject){
+      var s = document.createElement("script");
+      s.src = src; s.onload = resolve; s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+  function loadPdfLib(){
+    if (!pdfLibPromise){
+      pdfLibPromise = loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js")
+        .then(function(){ return loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"); })
+        .catch(function(e){ pdfLibPromise = null; throw e; });
+    }
+    return pdfLibPromise;
+  }
+  function pdfMoney(n){ return "$"+Number(n).toLocaleString("en-SG",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function hexToRgb(hex){
+    var m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+    if (!m) return [11,63,82];
+    var n = parseInt(m[1],16);
+    return [n>>16 & 255, n>>8 & 255, n & 255];
+  }
+  // Built-in centres keep their colour in orgColors (ORG_META only has a CSS variable).
+  function orgHex(org){
+    if (orgColors[org]) return orgColors[org];
+    var custom = findCustomOrg(org);
+    return custom ? custom.color : null;
+  }
+  // Small centre-coloured dot at the left of a table cell, level with its first line of text.
+  function orgDot(doc, cell, hex, x){
+    if (!hex) return;
+    var rgb = hexToRgb(hex);
+    doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+    doc.circle(cell.x + x, cell.y + cell.padding("top") + cell.styles.fontSize*0.45, cell.styles.fontSize*0.3, "F");
+  }
+  // Right-align the number columns in the header and total rows too, so they line up with the values.
+  function alignNumberHeads(cols){
+    return function(d){
+      if (d.section !== "body" && cols.indexOf(d.column.index) >= 0) d.cell.styles.halign = "right";
+    };
+  }
+  function buildPdf(period){
+    var today = todayStr();
+    var list = exportClasses(period);
+    var summary = exportSummary(list);
+    var range = exportRange(period);
+    var oneYear = range[0].slice(0,4) === range[1].slice(0,4);
+    var doc = new window.jspdf.jsPDF({ unit:"pt", format:"a4", compress:true });
+    var ink = [11,63,82], soft = [90,110,120];
+    var head = { fillColor:ink, textColor:255, fontStyle:"bold" };
+    var foot = { fillColor:[230,239,241], textColor:ink, fontStyle:"bold" };
+    var right = { halign:"right" };
+
+    doc.setFont("helvetica","bold"); doc.setFontSize(18); doc.setTextColor.apply(doc, ink);
+    doc.text("Teaching income", 40, 50);
+    doc.setFont("helvetica","normal"); doc.setFontSize(10); doc.setTextColor.apply(doc, soft);
+    doc.text(fmtDate(range[0])+" – "+fmtDate(range[1])+"   ·   Generated "+fmtDate(today), 40, 68);
+
+    var earned = summary.reduce(function(s,o){ return s+o.earned; }, 0);
+    var upcoming = summary.reduce(function(s,o){ return s+o.upcoming; }, 0);
+    var hours = summary.reduce(function(s,o){ return s+o.hours; }, 0);
+    doc.setFont("helvetica","bold"); doc.setFontSize(13); doc.setTextColor.apply(doc, ink);
+    doc.text("Earned "+pdfMoney(earned)+(upcoming > 0 ? "   ·   Still to come "+pdfMoney(upcoming) : ""), 40, 96);
+
+    doc.autoTable({
+      startY: 112,
+      head: [["Centre","Classes","Hours","Earned","Still to come","Total"]],
+      body: summary.map(function(o){
+        return [orgMeta(o.org).label, o.count, Math.round(o.hours*10)/10, pdfMoney(o.earned), pdfMoney(o.upcoming), pdfMoney(o.earned+o.upcoming)];
+      }),
+      foot: [["Total", list.length, Math.round(hours*10)/10, pdfMoney(earned), pdfMoney(upcoming), pdfMoney(earned+upcoming)]],
+      headStyles: head, footStyles: foot,
+      columnStyles: { 1:right, 2:right, 3:right, 4:right, 5:right },
+      didParseCell: function(d){
+        alignNumberHeads([1,2,3,4,5])(d);
+        if (d.section === "body" && d.column.index === 0){
+          d.cell.styles.fontStyle = "bold";
+          d.cell.styles.cellPadding = { top:6, bottom:6, right:6, left:18 };
+        }
+      },
+      didDrawCell: function(d){
+        if (d.section === "body" && d.column.index === 0) orgDot(doc, d.cell, orgHex(summary[d.row.index].org), 9);
+      },
+      styles: { fontSize:10, cellPadding:6 }, margin: { left:40, right:40 }
+    });
+
+    // Month-by-month totals when the export covers more than one month.
+    var months = {};
+    list.forEach(function(c){
+      var ym = c.date.slice(0,7);
+      var m = months[ym] || (months[ym] = { count:0, hours:0, earned:0, upcoming:0 });
+      m.count++;
+      m.hours += Number(c.durationHours) || 0;
+      if (c.date <= today) m.earned += c.income || 0; else m.upcoming += c.income || 0;
+    });
+    var monthKeys = Object.keys(months).sort();
+    if (monthKeys.length > 1){
+      doc.setFont("helvetica","bold"); doc.setFontSize(12); doc.setTextColor.apply(doc, ink);
+      doc.text("By month", 40, doc.lastAutoTable.finalY + 30);
+      doc.autoTable({
+        startY: doc.lastAutoTable.finalY + 40,
+        head: [["Month","Classes","Hours","Earned","Still to come","Total"]],
+        body: monthKeys.map(function(ym){
+          var m = months[ym];
+          return [monthLabelShort(ym), m.count, Math.round(m.hours*10)/10, pdfMoney(m.earned), pdfMoney(m.upcoming), pdfMoney(m.earned+m.upcoming)];
+        }),
+        headStyles: head,
+        columnStyles: { 1:right, 2:right, 3:right, 4:right, 5:right },
+        didParseCell: alignNumberHeads([1,2,3,4,5]),
+        styles: { fontSize:10, cellPadding:6 }, margin: { left:40, right:40 }
+      });
+    }
+
+    doc.setFont("helvetica","bold"); doc.setFontSize(12); doc.setTextColor.apply(doc, ink);
+    doc.text("Classes", 40, doc.lastAutoTable.finalY + 30);
+    doc.autoTable({
+      startY: doc.lastAutoTable.finalY + 40,
+      head: [["Date","Time","Centre","Class","Hours","Rate","Income"]],
+      body: list.map(function(c){
+        var p = c.date.split("-").map(Number);
+        var d = new Date(p[0], p[1]-1, p[2]).toLocaleDateString("en-SG", oneYear ? {day:"2-digit",month:"short"} : {day:"2-digit",month:"short",year:"2-digit"});
+        return [
+          WEEKDAY_LABELS[weekdayIdx(c.date)]+" "+d,
+          exportTimeText(c),
+          orgMeta(c.org).label,
+          exportClassName(c),
+          Number(c.durationHours) || 0,
+          c.rate != null ? pdfMoney(c.rate)+"/h" : "",
+          pdfMoney(c.income || 0)+(c.date > today ? " *" : "")
+        ];
+      }),
+      headStyles: head,
+      columnStyles: {
+        0:{ cellWidth: oneYear ? 58 : 72 }, 1:{ cellWidth:88 }, 2:{ cellWidth:76 },
+        4:{ halign:"right", cellWidth:36 }, 5:{ halign:"right", cellWidth:56 }, 6:{ halign:"right", cellWidth:60 }
+      },
+      didParseCell: function(d){
+        alignNumberHeads([4,5,6])(d);
+        if (d.section === "body" && d.column.index === 2) d.cell.styles.cellPadding = { top:4, bottom:4, right:4, left:12 };
+      },
+      didDrawCell: function(d){
+        if (d.section === "body" && d.column.index === 2) orgDot(doc, d.cell, orgHex(list[d.row.index].org), 6);
+      },
+      alternateRowStyles: { fillColor:[245,249,250] },
+      styles: { fontSize:8.5, cellPadding:4 }, margin: { left:40, right:40 }
+    });
+    if (list.some(function(c){ return c.date > today; })){
+      doc.setFont("helvetica","normal"); doc.setFontSize(8.5); doc.setTextColor.apply(doc, soft);
+      doc.text("* Upcoming class, not taught yet.", 40, doc.lastAutoTable.finalY + 18);
+    }
+    var pages = doc.getNumberOfPages();
+    for (var i = 1; i <= pages; i++){
+      doc.setPage(i);
+      doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor.apply(doc, soft);
+      doc.text("Page "+i+" of "+pages, doc.internal.pageSize.getWidth()-40, doc.internal.pageSize.getHeight()-24, { align:"right" });
+    }
+    return doc.output("blob");
+  }
+
+  // Phones get the share sheet (Save to Files, AirDrop, mail…); computers get a normal download.
+  async function saveExport(blob, filename){
+    var file = new File([blob], filename, { type: blob.type });
+    var touch = window.matchMedia && window.matchMedia("(pointer:coarse)").matches;
+    if (touch && navigator.canShare && navigator.canShare({ files:[file] })){
+      try{ await navigator.share({ files:[file], title:filename }); return; }
+      catch(e){ if (e && e.name === "AbortError") return; }
+    }
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 10000);
+  }
+
+  function exportSummaryText(period){
+    var list = exportClasses(period);
+    if (!list.length) return "No classes in "+exportPeriodLabel(period)+".";
+    var summary = exportSummary(list);
+    var earned = summary.reduce(function(s,o){ return s+o.earned; }, 0);
+    var upcoming = summary.reduce(function(s,o){ return s+o.upcoming; }, 0);
+    return list.length+" class"+(list.length===1?"":"es")+" · "+fmtMoney(earned)+" earned"+
+      (upcoming > 0 ? " · "+fmtMoney(upcoming)+" still to come" : "");
+  }
+  function renderExportSection(){
+    var chips = EXPORT_PERIODS.map(function(p){
+      return '<button class="chip'+(exportPeriod===p[0] ? " active" : "")+'" data-export-period="'+p[0]+'">'+p[1]+'</button>';
+    }).join("");
+    var empty = !exportClasses(exportPeriod).length;
+    return '<div class="card" id="exportCard"><h2>Export</h2>'+
+      '<div class="ih-hint" style="margin:-4px 0 12px;">Download your classes and income, e.g. for tax or your own records. Classes skipped for a trip are left out.</div>'+
+      '<div class="filter-row export-periods">'+chips+'</div>'+
+      '<div class="export-summary" id="exportSummary">'+exportSummaryText(exportPeriod)+'</div>'+
+      '<div class="export-btns">'+
+        '<button class="export-btn" id="exportCsv"'+(empty ? " disabled" : "")+'>CSV<small>for Excel / Sheets</small></button>'+
+        '<button class="export-btn" id="exportPdf"'+(empty ? " disabled" : "")+'>PDF<small>to keep or print</small></button>'+
+      '</div>'+
+    '</div>';
+  }
+  function bindExportSection(){
+    loadPdfLib().catch(function(){});
+    mainEl.querySelectorAll("[data-export-period]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        exportPeriod = btn.getAttribute("data-export-period");
+        var card = document.getElementById("exportCard");
+        card.outerHTML = renderExportSection();
+        bindExportSection();
+      });
+    });
+    document.getElementById("exportCsv").addEventListener("click", function(){
+      var blob = new Blob([buildCsv(exportPeriod)], { type:"text/csv;charset=utf-8" });
+      saveExport(blob, exportFileStem(exportPeriod)+".csv");
+    });
+    document.getElementById("exportPdf").addEventListener("click", async function(){
+      var btn = this;
+      btn.disabled = true;
+      try{
+        await loadPdfLib();
+        await saveExport(buildPdf(exportPeriod), exportFileStem(exportPeriod)+".pdf");
+      }catch(e){
+        console.error("export pdf", e);
+        showToast("Couldn't make the PDF. Check your connection.");
+      }
+      btn.disabled = false;
+    });
+  }
+
   function renderSettings(){
     sectionLabelEl.textContent = "Settings";
     var rows = ORG_ORDER.map(function(org){
@@ -1623,6 +1950,7 @@
         '<button id="saveGoalBtn" style="width:100%;background:var(--grad);color:var(--on-gradient);border:none;border-radius:999px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;">Save goal</button>'+
         '<div class="ih-hint" style="margin-top:8px;">Shown as a dashed line on your monthly income chart. Leave empty to turn it off.</div>'+
       '</div>'+
+      renderExportSection()+
       renderLeaveSection()+
       '<div class="card"><h2>Organisation colours</h2>'+
         rows+
@@ -1639,6 +1967,7 @@
     });
     document.getElementById("resetColorsBtn").addEventListener("click", resetOrgColors);
     bindLeaveSection();
+    bindExportSection();
     document.getElementById("saveGoalBtn").addEventListener("click", async function(){
       var val = Number(document.getElementById("goalInput").value) || 0;
       if (val < 0) val = 0;
