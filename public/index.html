@@ -514,6 +514,58 @@
   .wk-amt.past{ color:var(--accent); }
   .wk-amt.future{ color:var(--rose); }
   .wk-class.is-clash .wk-time{ color:var(--danger); font-weight:700; }
+  .wk-class.is-leave .wk-time, .wk-class.is-leave .wk-what, .wk-class.is-leave .wk-amt{ opacity:0.55; }
+  .wk-class.is-leave .wk-what, .wk-class.is-leave .wk-amt{ text-decoration:line-through; }
+  .wk-class.is-leave .wk-amt{ color:var(--ink-soft); }
+  .wk-leave-tag{ font-size:10.5px; font-weight:700; color:var(--accent); background:var(--accent-ink); border-radius:999px; padding:1px 7px; margin-left:4px; }
+  .wk-day.on-leave{ border-style:dashed; }
+  .cal-cell.on-leave{ background:repeating-linear-gradient(135deg, var(--surface-2) 0 6px, var(--accent-ink) 6px 12px); }
+  .leave-list{ display:flex; flex-direction:column; margin-bottom:12px; }
+  .leave-row{ display:flex; align-items:flex-start; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); }
+  .leave-row.is-past{ opacity:0.6; }
+  .leave-info{ flex:1; min-width:0; border:none; background:none; padding:0; font:inherit; color:var(--ink); text-align:left; cursor:pointer; }
+  .leave-go{ color:var(--ink-soft); font-weight:500; }
+  .relief-chip{ display:inline-block; margin-top:5px; font-size:11px; font-weight:700; border-radius:999px; padding:2px 9px; }
+  .relief-chip.missing{ color:var(--danger); background:var(--danger-ink); }
+  .relief-chip.ok{ color:var(--accent); background:var(--accent-ink); }
+  .relief-chip.none{ color:var(--ink-soft); background:var(--surface-2); font-weight:600; }
+  #leaveKind button{ line-height:1.25; }
+  #leaveKind button small{ font-weight:500; font-size:11px; opacity:0.75; }
+  .relief-banner{
+    order:1; display:flex; align-items:center; gap:8px; width:100%;
+    border:1px solid var(--rose); background:var(--surface); border-radius:14px; padding:10px 14px;
+    font:inherit; color:var(--ink); text-align:left; cursor:pointer;
+  }
+  .relief-title{ font-size:13px; font-weight:800; color:var(--rose); white-space:nowrap; }
+  .relief-go{ font-size:12px; font-weight:800; color:var(--rose); white-space:nowrap; }
+  .leave-modal{ max-width:440px; }
+  .ld-section{ font-size:10.5px; text-transform:uppercase; letter-spacing:0.09em; color:var(--ink-soft); font-weight:700; margin:14px 0 4px; }
+  .ld-section .ld-sub{ text-transform:none; letter-spacing:0; font-weight:500; }
+  .ld-row{ display:flex; align-items:center; gap:8px; padding:7px 0; border-top:1px solid var(--line); font-size:12.5px; }
+  .ld-section + .ld-row{ border-top:none; }
+  .ld-group{ margin-top:6px; }
+  .ld-group-head{ display:flex; align-items:center; gap:8px; padding:8px 0 2px; font-size:13px; }
+  .ld-group-head .link-btn{ font-size:11.5px; }
+  .ld-group .ld-row{ padding-left:15px; }
+  .wk-relief{ font-size:10px; font-weight:700; border-radius:999px; padding:1px 6px; text-decoration:none; display:inline-block; }
+  .wk-relief.ok{ color:var(--accent); background:var(--accent-ink); }
+  .wk-relief.missing{ color:var(--danger); background:var(--danger-ink); }
+  .ld-name{ flex:1; min-width:0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ld-sub{ color:var(--ink-soft); font-weight:500; }
+  .ld-amt{ font-size:12px; font-weight:700; }
+  .ld-toggle{
+    flex:0 0 auto; min-width:78px; border:1px solid var(--line); background:var(--surface-2); color:var(--ink-soft);
+    border-radius:999px; padding:5px 10px; font:inherit; font-size:11.5px; font-weight:700; cursor:pointer; text-align:center;
+  }
+  .ld-toggle.on{ background:var(--accent-ink); border-color:var(--accent); color:var(--accent); }
+  .ld-toggle.warn{ background:var(--danger-ink); border-color:var(--danger); color:var(--danger); }
+  .leave-name{ font-size:13.5px; font-weight:700; }
+  .leave-sub{ font-size:11.5px; color:var(--ink-soft); margin-top:2px; }
+  .leave-tag{ font-size:9.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--ink-soft); background:var(--surface-2); border-radius:6px; padding:1px 5px; }
+  .leave-dates{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .leave-dates .field input{ min-width:0; width:100%; box-sizing:border-box; }
+  .leave-add-btn{ width:100%; background:var(--grad); color:var(--on-gradient); border:none; border-radius:999px; padding:12px; font-size:13px; font-weight:700; cursor:pointer; }
+  .leave-add-btn:disabled{ opacity:0.6; }
   .clash-banner{
     order:1; display:flex; align-items:center; gap:8px; width:100%;
     border:1px solid var(--danger); background:var(--danger-ink); border-radius:14px; padding:10px 14px;
@@ -915,6 +967,9 @@
     var d = new Date(parts[0], parts[1]-1, parts[2]);
     return d.toLocaleDateString("en-SG",{day:"2-digit",month:"short",year:"numeric"});
   }
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, function(ch){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]; });
+  }
   function fmtWhole(n){ return (n<0?"-":"")+"$"+Math.round(Math.abs(n)).toLocaleString("en-SG"); }
   function fmtMoney(n){
     var sign = n<0 ? "-" : "";
@@ -954,6 +1009,9 @@
   var breakdownYear = todayStr().slice(0,4); // which year the breakdown shows when period is "year"
   var monthlyGoal = 0;         // target combined income per month (0 = not set)
   var dismissedClashes = {};   // clashKey -> true for clashes the user said are fine
+  var leaves = [];             // overseas trips {id, start, end, label, working, relief:{org:true}}
+  var leaveDraft = null;       // {start, end, label, working} typed into the trip form, kept across re-renders
+  var openLeaveId = null;      // which trip's detail popup is open
   var breakdownMonth = todayStr().slice(0,7); // which month the breakdown shows when period is "month"
   var historyOrgFilter = "all";
   var historyView = "calendar";    // list | week | calendar | synclog
@@ -1030,9 +1088,62 @@
       snap.docs.forEach(function(d){ payments[d.id] = d.data(); });
       renderAll();
     }, function(err){ console.error("payments onSnapshot", err); });
+
+    db.collection("leaves").onSnapshot(function(snap){
+      leaves = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); })
+        .sort(function(a,b){ return a.start < b.start ? -1 : 1; });
+      renderAll();
+      renderLeaveModal();
+    }, function(err){ console.error("leaves onSnapshot", err); });
   }
 
-  function activeClasses(){ return classes.filter(function(c){ return !c.deletedAt; }); }
+  // Classes inside a leave period are hidden at read time rather than deleted, so syncs and
+  // repeating classes can't bring them back, and removing the leave restores them.
+  function liveClasses(){ return classes.filter(function(c){ return !c.deletedAt; }); }
+  function activeClasses(){ return liveClasses().filter(function(c){ return !leaveForClass(c); }); }
+
+  // ---------------- overseas trips ----------------
+  // A trip is either working (classes go on as usual) or not working (every class in it is skipped,
+  // and each affected centre needs a relief teacher).
+  function leaveForClass(c){
+    for (var i = 0; i < leaves.length; i++){
+      var l = leaves[i];
+      if (!l.working && c.date >= l.start && c.date <= l.end) return l;
+    }
+    return null;
+  }
+  function leavesOn(dateStr){ return leaves.filter(function(l){ return dateStr >= l.start && dateStr <= l.end; }); }
+  function leaveClasses(l){
+    return liveClasses().filter(function(c){ return c.date >= l.start && c.date <= l.end; })
+      .sort(function(a,b){ return a.date !== b.date ? (a.date < b.date ? -1 : 1) : (a.startTime||"").localeCompare(b.startTime||""); });
+  }
+  function leaveSkipped(l){ return l.working ? [] : leaveClasses(l); }
+  // Relief is tracked per class (relief[classId] = true once someone is covering it).
+  function reliefSecured(l, c){ return !!(l.relief && l.relief[c.id]); }
+  function leaveReliefMissing(l){
+    return leaveSkipped(l).filter(function(c){ return !reliefSecured(l, c); });
+  }
+  async function updateLeave(id, patch){
+    var l = leaves.find(function(x){ return x.id === id; });
+    if (l){ // show the change straight away; the snapshot confirms it
+      Object.keys(patch).forEach(function(k){
+        l[k] = (patch[k] && typeof patch[k] === "object") ? Object.assign({}, l[k] || {}, patch[k]) : patch[k];
+      });
+      renderAll();
+      renderLeaveModal();
+    }
+    try{
+      await db.collection("leaves").doc(id).set(patch, {merge:true});
+    }catch(e){
+      console.error("update leave", e);
+      showToast("Couldn't save. Check your connection.", false);
+    }
+  }
+  function leaveRangeText(l){
+    var opts = {day:"numeric", month:"short", year:"numeric"};
+    var s = new Date(l.start+"T00:00:00").toLocaleDateString("en-SG", opts);
+    return l.start === l.end ? s : new Date(l.start+"T00:00:00").toLocaleDateString("en-SG", {day:"numeric", month:"short"})+" – "+new Date(l.end+"T00:00:00").toLocaleDateString("en-SG", opts);
+  }
 
   // ---------------- recurring materialization ----------------
   var materializing = false;
@@ -1255,6 +1366,229 @@
     return '<div class="card"><h2>Your tuition centres</h2>'+rows+'</div>';
   }
 
+  function leaveTitle(l){ return l.label ? escapeHtml(l.label) : "Overseas"; }
+  function leaveKindText(l){ return l.working ? "Working" : "Not working"; }
+  function leaveReliefChip(l){
+    if (l.working) return '<span class="relief-chip none">Working · classes as usual</span>';
+    var need = leaveSkipped(l).length, missing = leaveReliefMissing(l).length;
+    if (!need) return "";
+    return missing
+      ? '<span class="relief-chip missing">Relief needed for '+missing+' of '+need+' class'+(need===1?'':'es')+'</span>'
+      : '<span class="relief-chip ok">Relief secured for all '+need+' ✓</span>';
+  }
+
+  // Popup for one trip: relief per class (when not working), grouped by centre.
+  function openLeaveDetail(id){ openLeaveId = id; renderLeaveModal(); }
+  function renderLeaveModal(){
+    var existing = document.getElementById("leaveOverlay");
+    var scrollTop = existing ? existing.querySelector(".modal-card").scrollTop : 0;
+    if (existing) existing.remove();
+    if (!openLeaveId) return;
+    var l = leaves.find(function(x){ return x.id === openLeaveId; });
+    if (!l){ openLeaveId = null; return; }
+    var today = todayStr();
+
+    var all = leaveClasses(l);
+    var classDay = function(c){
+      return new Date(c.date+"T00:00:00").toLocaleDateString("en-SG",{weekday:"short", day:"numeric", month:"short"})+' · '+formatTime12h(c.startTime);
+    };
+    var bodyHtml;
+    if (!all.length){
+      bodyHtml = '<div class="ih-hint" style="margin-top:12px;">No classes in these dates.</div>';
+    } else if (l.working){
+      bodyHtml = '<div class="ld-section">Classes in these dates <span class="ld-sub">— counted as usual</span></div>'+
+        all.map(function(c){
+          var meta = orgMeta(c.org);
+          return '<div class="ld-row"><span class="dot" style="background:'+meta.color+'"></span>'+
+            '<span class="ld-name">'+classDay(c)+' <span class="ld-sub">· '+meta.label+'</span></span>'+
+            '<span class="ld-amt mono">'+fmtMoney(c.income || 0)+'</span></div>';
+        }).join("");
+    } else {
+      var missing = leaveReliefMissing(l).length;
+      bodyHtml = '<div class="ld-section">Relief secured? <span class="ld-sub">— '+(all.length - missing)+' of '+all.length+' done</span></div>'+
+        allOrgKeys().map(function(o){
+          var list = all.filter(function(c){ return c.org === o; });
+          if (!list.length) return "";
+          var meta = orgMeta(o);
+          var done = list.filter(function(c){ return reliefSecured(l, c); }).length;
+          return '<div class="ld-group">'+
+            '<div class="ld-group-head"><span class="dot" style="background:'+meta.color+'"></span>'+
+              '<span class="ld-name">'+meta.label+' <span class="ld-sub">· '+done+'/'+list.length+'</span></span>'+
+              '<button class="link-btn" data-relief-org="'+o+'">'+(done === list.length ? 'Undo all' : 'All secured')+'</button>'+
+            '</div>'+
+            list.map(function(c){
+              var ok = reliefSecured(l, c), label = classTypeLabel(c);
+              return '<div class="ld-row">'+
+                '<span class="ld-name">'+classDay(c)+(label ? ' <span class="ld-sub">· '+label+'</span>' : '')+'</span>'+
+                '<button class="ld-toggle'+(ok ? ' on' : ' warn')+'" data-relief="'+c.id+'">'+(ok ? 'Secured ✓' : 'Not yet')+'</button>'+
+              '</div>';
+            }).join("")+
+          '</div>';
+        }).join("");
+    }
+
+    var overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "leaveOverlay";
+    overlay.innerHTML = '<div class="modal-card leave-modal">'+
+      '<div class="modal-head"><h3>✈️ '+leaveTitle(l)+'</h3><button class="icon-btn" data-close aria-label="Close">✕</button></div>'+
+      '<div class="ih-hint" style="margin:-8px 0 12px;">'+leaveRangeText(l)+' · '+leaveKindText(l)+'</div>'+
+      '<div class="seg" id="ldKind" style="margin-bottom:4px;">'+
+        '<button data-working="0" class="'+(l.working ? '' : 'active')+'">Not working</button>'+
+        '<button data-working="1" class="'+(l.working ? 'active' : '')+'">Working</button>'+
+      '</div>'+
+      bodyHtml+
+    '</div>';
+    document.body.appendChild(overlay);
+    overlay.querySelector(".modal-card").scrollTop = scrollTop;
+    overlay.addEventListener("click", function(e){
+      if (e.target === overlay || e.target.closest("[data-close]")){ openLeaveId = null; overlay.remove(); }
+    });
+    overlay.querySelectorAll("[data-relief]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var id = btn.getAttribute("data-relief"), patch = {};
+        patch[id] = !(l.relief && l.relief[id]);
+        updateLeave(l.id, { relief: patch });
+      });
+    });
+    overlay.querySelectorAll("[data-relief-org]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var list = all.filter(function(c){ return c.org === btn.getAttribute("data-relief-org"); });
+        var allDone = list.every(function(c){ return reliefSecured(l, c); });
+        var patch = {};
+        list.forEach(function(c){ patch[c.id] = !allDone; });
+        updateLeave(l.id, { relief: patch });
+      });
+    });
+    overlay.querySelectorAll("#ldKind [data-working]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var working = btn.getAttribute("data-working") === "1";
+        if (working !== !!l.working) updateLeave(l.id, { working: working });
+      });
+    });
+  }
+
+  // Dashboard reminder for an upcoming trip that still needs a relief teacher.
+  function reliefAlertHtml(){
+    var today = todayStr();
+    var pending = leaves.filter(function(l){ return l.end >= today && leaveReliefMissing(l).length; });
+    if (!pending.length) return "";
+    var l = pending[0];
+    return '<button class="relief-banner" data-open-leave="'+l.id+'">'+
+      '<span class="relief-title">✈️ Relief not secured</span>'+
+      '<span class="clash-next">'+leaveTitle(l)+' · '+leaveRangeText(l)+' · '+leaveReliefMissing(l).length+' of '+leaveSkipped(l).length+' classes need cover'+
+        (pending.length > 1 ? ' (+'+(pending.length-1)+' more)' : '')+'</span>'+
+      '<span class="relief-go">Sort ›</span>'+
+    '</button>';
+  }
+
+  function renderLeaveSection(){
+    var today = todayStr();
+    var draft = leaveDraft || { start:today, end:today, label:"", working:false };
+    var listHtml = leaves.map(function(l){
+      var past = l.end < today;
+      var classes = leaveClasses(l);
+      var amount = classes.reduce(function(sum, c){ return sum + (c.income || 0); }, 0);
+      var classText = classes.length+' class'+(classes.length===1?'':'es')+' · '+fmtMoney(amount)+(l.working ? '' : ' skipped');
+      return '<div class="leave-row'+(past ? ' is-past' : '')+'">'+
+        '<button class="leave-info" data-open-leave="'+l.id+'">'+
+          '<div class="leave-name">✈️ '+leaveTitle(l)+(past ? ' <span class="leave-tag">Past</span>' : '')+' <span class="leave-go">›</span></div>'+
+          '<div class="leave-sub">'+leaveRangeText(l)+' · '+leaveKindText(l)+'</div>'+
+          '<div class="leave-sub">'+classText+'</div>'+
+          (past ? '' : leaveReliefChip(l))+
+        '</button>'+
+        '<button class="icon-btn danger" data-del-leave="'+l.id+'" title="Remove trip" aria-label="Remove trip">✕</button>'+
+      '</div>';
+    }).join("");
+    var kindChoice = '<div class="choice-row" id="leaveKind">'+
+      '<button data-working="0" class="'+(draft.working ? "" : "active")+'">Not working<br><small>classes skipped · need relief</small></button>'+
+      '<button data-working="1" class="'+(draft.working ? "active" : "")+'">Working<br><small>classes as usual</small></button>'+
+    '</div>';
+    return '<div class="card" id="leaveCard"><h2>Overseas</h2>'+
+      '<div class="ih-hint" style="margin:-4px 0 12px;">Add a trip. If you\'re not working, its classes stop counting towards income and you can tick off relief for each centre.</div>'+
+      (listHtml ? '<div class="leave-list">'+listHtml+'</div>' : '')+
+      '<div class="leave-form">'+
+        '<div class="leave-dates">'+
+          '<div class="field"><label>From</label><input type="date" id="leaveStart" value="'+draft.start+'"></div>'+
+          '<div class="field"><label>To</label><input type="date" id="leaveEnd" value="'+draft.end+'"></div>'+
+        '</div>'+
+        '<div class="field"><label>Name (optional)</label><input type="text" id="leaveLabel" placeholder="e.g. Japan trip" maxlength="40" value="'+escapeHtml(draft.label)+'"></div>'+
+        '<div class="field"><label>Are you working?</label>'+kindChoice+'</div>'+
+        '<div class="ih-hint" id="leavePreview" style="margin:-4px 0 10px;"></div>'+
+        '<button id="addLeaveBtn" class="leave-add-btn">Add trip</button>'+
+      '</div>'+
+    '</div>';
+  }
+
+  function bindLeaveSection(){
+    var startEl = document.getElementById("leaveStart"), endEl = document.getElementById("leaveEnd");
+    var previewEl = document.getElementById("leavePreview"), labelEl = document.getElementById("leaveLabel");
+    var working = !!(leaveDraft && leaveDraft.working);
+    function formValue(){
+      return { start:startEl.value, end:endEl.value, working:working };
+    }
+    function saveDraft(){ leaveDraft = { start:startEl.value, end:endEl.value, label:labelEl.value, working:working }; }
+    labelEl.addEventListener("input", saveDraft);
+    mainEl.querySelectorAll("#leaveKind button").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        working = btn.getAttribute("data-working") === "1";
+        mainEl.querySelectorAll("#leaveKind button").forEach(function(b){ b.classList.toggle("active", b === btn); });
+        updatePreview();
+      });
+    });
+    mainEl.querySelectorAll("[data-open-leave]").forEach(function(btn){
+      btn.addEventListener("click", function(){ openLeaveDetail(btn.getAttribute("data-open-leave")); });
+    });
+    function updatePreview(){
+      saveDraft();
+      var l = formValue();
+      if (!l.start || !l.end || l.end < l.start){ previewEl.textContent = "Pick a start date on or before the end date."; return; }
+      var classes = leaveClasses(l);
+      var amount = classes.reduce(function(sum, c){ return sum + (c.income || 0); }, 0);
+      if (l.working) previewEl.textContent = classes.length+" class"+(classes.length===1?"":"es")+" in these dates will count as usual.";
+      else previewEl.textContent = classes.length
+        ? "This will skip "+classes.length+" class"+(classes.length===1?"":"es")+" worth "+fmtMoney(amount)+"."
+        : "No classes in these dates right now. Any added later will be skipped too.";
+    }
+    startEl.addEventListener("change", function(){ if (!endEl.value || endEl.value < startEl.value) endEl.value = startEl.value; updatePreview(); });
+    endEl.addEventListener("change", updatePreview);
+    document.getElementById("addLeaveBtn").addEventListener("click", async function(){
+      var l = formValue();
+      if (!l.start || !l.end || l.end < l.start){ showToast("Pick a start date on or before the end date", false); return; }
+      var btn = this;
+      btn.disabled = true;
+      try{
+        await db.collection("leaves").add({
+          start:l.start, end:l.end, working:l.working,
+          label:labelEl.value.trim() || null,
+          relief:{},
+          createdAt:Date.now()
+        });
+        leaveDraft = null;
+        renderSettings();
+        showToast("Trip added", false);
+      }catch(e){
+        console.error("add trip", e);
+        btn.disabled = false;
+        showToast("Couldn't save. Check your connection.", false);
+      }
+    });
+    mainEl.querySelectorAll("[data-del-leave]").forEach(function(btn){
+      btn.addEventListener("click", async function(){
+        var l = leaves.find(function(x){ return x.id === btn.getAttribute("data-del-leave"); });
+        if (!l || !window.confirm("Remove "+(l.label || "this trip")+" ("+leaveRangeText(l)+")?"+(l.working ? "" : " Its classes will count again."))) return;
+        try{
+          await db.collection("leaves").doc(l.id).delete();
+          showToast("Trip removed", false);
+        }catch(e){
+          console.error("remove trip", e);
+          showToast("Couldn't remove. Check your connection.", false);
+        }
+      });
+    });
+    updatePreview();
+  }
+
   function renderSettings(){
     sectionLabelEl.textContent = "Settings";
     var rows = ORG_ORDER.map(function(org){
@@ -1273,6 +1607,7 @@
         '<button id="saveGoalBtn" style="width:100%;background:var(--grad);color:var(--on-gradient);border:none;border-radius:999px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;">Save goal</button>'+
         '<div class="ih-hint" style="margin-top:8px;">Shown as a dashed line on your monthly income chart. Leave empty to turn it off.</div>'+
       '</div>'+
+      renderLeaveSection()+
       '<div class="card"><h2>Organisation colours</h2>'+
         rows+
         '<button id="resetColorsBtn" style="margin-top:16px;width:100%;background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:999px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;">Reset to defaults</button>'+
@@ -1287,6 +1622,7 @@
       });
     });
     document.getElementById("resetColorsBtn").addEventListener("click", resetOrgColors);
+    bindLeaveSection();
     document.getElementById("saveGoalBtn").addEventListener("click", async function(){
       var val = Number(document.getElementById("goalInput").value) || 0;
       if (val < 0) val = 0;
@@ -1855,6 +2191,7 @@
       '<div class="dash-col col-a">'+
         upNextHtml()+
         clashAlertHtml()+
+        reliefAlertHtml()+
         '<div class="period-scroller">'+cardsHtml+'</div>'+
         comingUpHtml()+
       '</div>'+
@@ -1891,6 +2228,9 @@
     });
     var clashBanner = document.getElementById("clashBanner");
     if (clashBanner) clashBanner.addEventListener("click", openClashList);
+    mainEl.querySelectorAll(".relief-banner[data-open-leave]").forEach(function(btn){
+      btn.addEventListener("click", function(){ openLeaveDetail(btn.getAttribute("data-open-leave")); });
+    });
     mainEl.querySelectorAll("[data-pay]").forEach(function(btn){
       btn.addEventListener("click", function(){
         var p = btn.getAttribute("data-pay").split("|");
@@ -2287,6 +2627,9 @@
     });
     var totals = periodTotals([historyWeek, weekEnd], historyOrgFilter);
     var hours = inWeek.reduce(function(sum, c){ return sum + (Number(c.durationHours) || 0); }, 0);
+    var skippedInWeek = liveClasses().filter(function(c){
+      return c.date >= historyWeek && c.date <= weekEnd && (historyOrgFilter==="all" || c.org===historyOrgFilter) && leaveForClass(c);
+    });
     var clashIds = {};
     inWeek.forEach(function(c){
       var live = clashesWith(c, c.id).filter(function(o){ return !isClashDismissed(c, o); });
@@ -2302,25 +2645,36 @@
     var daysHtml = "";
     for (var i = 0; i < 7; i++){
       var d = addDays(historyWeek, i);
-      var dayList = inWeek.filter(function(c){ return c.date === d; })
-        .sort(function(a,b){ return (a.startTime||"").localeCompare(b.startTime||""); });
+      var dayList = inWeek.filter(function(c){ return c.date === d; });
       var dayTotal = dayList.reduce(function(sum, c){ return sum + (c.income || 0); }, 0);
+      var skippedList = skippedInWeek.filter(function(c){ return c.date === d; });
+      var shown = dayList.concat(skippedList)
+        .sort(function(a,b){ return (a.startTime||"").localeCompare(b.startTime||""); });
+      var dayLeaves = leavesOn(d);
       var dp = d.split("-").map(Number);
       var dayName = new Date(dp[0], dp[1]-1, dp[2]).toLocaleDateString("en-SG", {weekday:"short", day:"numeric", month:"short"});
-      var rows = dayList.map(function(c){
+      var offTrip = dayLeaves.some(function(l){ return !l.working; });
+      var leaveTag = dayLeaves.length
+        ? ' <span class="wk-leave-tag">✈️ '+escapeHtml(dayLeaves[0].label || "Overseas")+'</span>' : '';
+      var rows = shown.map(function(c){
         var meta = orgMeta(c.org);
         var label = classTypeLabel(c);
         var h = Number(c.durationHours) || 0;
-        return '<button class="wk-class'+(clashIds[c.id]?' is-clash':'')+'" data-wkclass="'+c.id+'"'+(clashIds[c.id]?' title="Overlaps another class"':'')+'>'+
-          '<span class="wk-time mono">'+(clashIds[c.id]?'⚠ ':'')+(formatTime12h(c.startTime) || "—")+'</span>'+
+        var onLeave = skippedList.indexOf(c) !== -1;
+        var cls = "wk-class"+(onLeave ? " is-leave" : clashIds[c.id] ? " is-clash" : "");
+        var title = onLeave ? ' title="Skipped — overseas, not working"' : clashIds[c.id] ? ' title="Overlaps another class"' : '';
+        return '<button class="'+cls+'" data-wkclass="'+c.id+'"'+title+'>'+
+          '<span class="wk-time mono">'+(clashIds[c.id] && !onLeave ?'⚠ ':'')+(formatTime12h(c.startTime) || "—")+'</span>'+
           '<span class="wk-what"><span class="dot" style="background:'+meta.color+'"></span>'+meta.label+(label ? ' <span class="wk-sub">· '+label+'</span>' : '')+'</span>'+
-          '<span class="wk-dur mono">'+(h ? (Math.round(h*100)/100)+'h' : '')+'</span>'+
+          (onLeave
+            ? (reliefSecured(leaveForClass(c), c) ? '<span class="wk-relief ok">relief ✓</span>' : '<span class="wk-relief missing">no relief</span>')
+            : '<span class="wk-dur mono">'+(h ? (Math.round(h*100)/100)+'h' : '')+'</span>')+
           '<span class="wk-amt mono '+(c.date > today ? "future" : "past")+'">'+fmtMoney(c.income || 0)+'</span>'+
         '</button>';
       }).join("");
-      daysHtml += '<div class="wk-day'+(d===today?" is-today":"")+(dayList.length?"":" is-free")+'">'+
-        '<div class="wk-head"><span class="wk-name">'+dayName+(d===today?' <span class="wk-today-tag">Today</span>':'')+'</span>'+
-          '<span class="wk-total mono">'+(dayList.length ? fmtMoney(dayTotal) : "Free")+'</span></div>'+
+      daysHtml += '<div class="wk-day'+(d===today?" is-today":"")+(dayList.length?"":" is-free")+(dayLeaves.length?" on-leave":"")+'">'+
+        '<div class="wk-head"><span class="wk-name">'+dayName+(d===today?' <span class="wk-today-tag">Today</span>':'')+leaveTag+'</span>'+
+          '<span class="wk-total mono">'+(dayList.length ? fmtMoney(dayTotal) : offTrip ? "Off" : "Free")+'</span></div>'+
         rows+
       '</div>';
     }
@@ -2363,7 +2717,7 @@
           return '<span class="cal-chip" data-detailchip="'+c.id+'" style="background:'+meta.color+'">'+formatTime12h(c.startTime)+'</span>';
         }).join("");
         var more = dayList.length>3 ? '<span class="cal-chip-more">+'+(dayList.length-3)+' more</span>' : "";
-        var cls = "cal-cell" + (dateStr===today?" is-today":"") + (dateStr===calendarSelected?" is-selected":"");
+        var cls = "cal-cell" + (dateStr===today?" is-today":"") + (dateStr===calendarSelected?" is-selected":"") + (leavesOn(dateStr).length?" on-leave":"");
         var dayNum = Number(dateStr.split("-")[2]);
         return '<button class="'+cls+'" data-date="'+dateStr+'"><span class="cal-daynum">'+dayNum+'</span><div class="cal-chips">'+chips+more+'</div></button>';
       }).join("") + '</div>';
