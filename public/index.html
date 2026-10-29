@@ -513,6 +513,36 @@
   .wk-amt{ font-weight:700; font-size:12.5px; }
   .wk-amt.past{ color:var(--accent); }
   .wk-amt.future{ color:var(--rose); }
+  .wk-class.is-clash .wk-time{ color:var(--danger); font-weight:700; }
+  .clash-banner{
+    order:1; display:flex; align-items:center; gap:8px; width:100%;
+    border:1px solid var(--danger); background:var(--danger-ink); border-radius:14px; padding:10px 14px;
+    font:inherit; color:var(--ink); text-align:left; cursor:pointer;
+  }
+  .clash-title{ font-size:13px; font-weight:800; color:var(--danger); white-space:nowrap; }
+  .clash-next{ flex:1; min-width:0; font-size:12px; color:var(--ink-soft); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .clash-go{ font-size:12px; font-weight:800; color:var(--danger); white-space:nowrap; }
+  .clash-modal{ max-width:420px; }
+  .clash-list{ display:flex; flex-direction:column; gap:10px; }
+  .clash-item{ border:1px solid var(--line); border-left:4px solid var(--danger); border-radius:14px; padding:11px 13px; background:var(--surface-2); }
+  .cc-head{ display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:6px; }
+  .cc-day{ font-size:13.5px; font-weight:800; }
+  .cc-overlap{ font-size:11px; font-weight:700; color:var(--danger); background:var(--danger-ink); border-radius:999px; padding:2px 8px; white-space:nowrap; }
+  .cc-class{ display:flex; align-items:center; gap:8px; padding:4px 0; font-size:12.5px; }
+  .cc-name{ flex:1; min-width:0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .cc-sub{ color:var(--ink-soft); font-weight:500; }
+  .cc-time{ font-size:11.5px; color:var(--ink-soft); white-space:nowrap; }
+  .cc-actions{ display:flex; gap:8px; margin-top:8px; }
+  .cc-btn{
+    flex:1; border:1px solid var(--line); background:var(--surface-solid); color:var(--ink);
+    border-radius:999px; padding:7px 10px; font:inherit; font-size:12px; font-weight:700; cursor:pointer;
+  }
+  .cc-btn.dismiss{ color:var(--danger); }
+  .cc-btn.dismiss:hover{ background:var(--danger-ink); border-color:var(--danger); }
+  .cc-dismiss-all{
+    width:100%; margin-top:12px; border:none; background:none; color:var(--ink-soft);
+    font:inherit; font-size:12px; font-weight:700; cursor:pointer; padding:6px;
+  }
   .link-btn{ border:none; background:none; padding:0; color:var(--accent); font:inherit; font-weight:700; cursor:pointer; }
   .cal-daypanel{ margin-top:16px; }
   .cal-daypanel h3{ font-size:15px; margin:0 0 10px; }
@@ -923,6 +953,7 @@
   var breakdownPeriod = "month"; // today | week | month | year
   var breakdownYear = todayStr().slice(0,4); // which year the breakdown shows when period is "year"
   var monthlyGoal = 0;         // target combined income per month (0 = not set)
+  var dismissedClashes = {};   // clashKey -> true for clashes the user said are fine
   var breakdownMonth = todayStr().slice(0,7); // which month the breakdown shows when period is "month"
   var historyOrgFilter = "all";
   var historyView = "calendar";    // list | week | calendar | synclog
@@ -988,6 +1019,11 @@
       monthlyGoal = snap.exists ? (Number(snap.data().monthly) || 0) : 0;
       renderAll();
     }, function(err){ console.error("goals onSnapshot", err); });
+
+    db.doc("settings/clashes").onSnapshot(function(snap){
+      dismissedClashes = (snap.exists && snap.data().dismissed) || {};
+      renderAll();
+    }, function(err){ console.error("clashes onSnapshot", err); });
 
     db.collection("payments").onSnapshot(function(snap){
       payments = {};
@@ -1340,6 +1376,150 @@
     return upcoming;
   }
 
+  // ---- Clashes: two classes on the same day whose times overlap ----
+  function classSpan(c){
+    var start = timeToMinutes(c.startTime);
+    if (start === null) return null;
+    var end = start + (Number(c.durationHours)||0)*60;
+    return end > start ? [start, end] : null;
+  }
+  function spansOverlap(a, b){ return a[0] < b[1] && b[0] < a[1]; }
+  // Existing classes that would overlap a class with these fields (date, startTime, durationHours).
+  function clashesWith(fields, ignoreId){
+    var span = classSpan(fields);
+    if (!span) return [];
+    return activeClasses().filter(function(c){
+      if (c.id === ignoreId || c.date !== fields.date) return false;
+      var other = classSpan(c);
+      return other && spansOverlap(span, other);
+    });
+  }
+  // Identifies a clash by both classes and their timing, so editing either class brings the warning back.
+  function clashKey(a, b){
+    return [a, b].map(function(c){ return c.id+"@"+c.date+"@"+c.startTime+"@"+c.durationHours; })
+      .sort().join("~").replace(/[.\/]/g, "_");
+  }
+  function isClashDismissed(a, b){ return !!dismissedClashes[clashKey(a, b)]; }
+  async function dismissClashes(pairs){
+    if (!db || !pairs.length) return;
+    var dismissed = {};
+    pairs.forEach(function(p){ dismissed[clashKey(p[0], p[1])] = true; });
+    try{
+      await db.doc("settings/clashes").set({ dismissed: dismissed, updatedAt: Date.now() }, {merge:true});
+      showToast(pairs.length === 1 ? "Clash dismissed" : pairs.length+" clashes dismissed", false);
+    }catch(e){
+      console.error(e);
+      showToast("Couldn't dismiss — try again", false);
+    }
+  }
+  // Overlapping pairs from today onward that haven't been dismissed, soonest first.
+  function upcomingClashes(){
+    var today = todayStr();
+    var byDate = {};
+    activeClasses().forEach(function(c){
+      if (c.date < today || !classSpan(c)) return;
+      (byDate[c.date] = byDate[c.date] || []).push(c);
+    });
+    var pairs = [];
+    Object.keys(byDate).sort().forEach(function(d){
+      var list = byDate[d].sort(function(a,b){ return classSpan(a)[0] - classSpan(b)[0]; });
+      for (var i = 0; i < list.length; i++){
+        for (var j = i+1; j < list.length; j++){
+          if (spansOverlap(classSpan(list[i]), classSpan(list[j])) && !isClashDismissed(list[i], list[j])) pairs.push([list[i], list[j]]);
+        }
+      }
+    });
+    return pairs;
+  }
+  function classTimeRange(c){
+    var span = classSpan(c);
+    if (!span) return formatTime12h(c.startTime);
+    var end = span[1] % 1440;
+    return formatTime12h(c.startTime)+"–"+formatTime12h(pad(Math.floor(end/60))+":"+pad(Math.round(end%60)));
+  }
+  function clashConfirmText(others){
+    return "This overlaps with " + others.map(function(c){
+      return orgMeta(c.org).label+" ("+classTimeRange(c)+")";
+    }).join(", ") + " on " + fmtDate(others[0].date) + ".\n\nSave anyway?";
+  }
+
+  // Dashboard banner only; the clashes themselves are listed in their own popup.
+  function clashAlertHtml(){
+    var pairs = upcomingClashes();
+    if (!pairs.length) return "";
+    var next = new Date(pairs[0][0].date+"T00:00:00").toLocaleDateString("en-SG",{weekday:"short", day:"numeric", month:"short"});
+    return '<button class="clash-banner" id="clashBanner">'+
+      '<span class="clash-title">⚠ '+pairs.length+' timing clash'+(pairs.length===1?'':'es')+'</span>'+
+      '<span class="clash-next">next on '+next+'</span>'+
+      '<span class="clash-go">Review ›</span>'+
+    '</button>';
+  }
+
+  function clashCardHtml(p, i){
+    var day = new Date(p[0].date+"T00:00:00").toLocaleDateString("en-SG",{weekday:"long", day:"numeric", month:"short"});
+    var a = classSpan(p[0]), b = classSpan(p[1]);
+    var overlap = Math.round(Math.min(a[1], b[1]) - Math.max(a[0], b[0]));
+    var overlapText = a[0] === b[0] ? "same start time" : "overlaps "+(overlap >= 60 ? (Math.round(overlap/6)/10)+" h" : overlap+" min");
+    var classRow = function(c){
+      var meta = orgMeta(c.org), label = classTypeLabel(c);
+      return '<div class="cc-class"><span class="dot" style="background:'+meta.color+'"></span>'+
+        '<span class="cc-name">'+meta.label+(label ? ' <span class="cc-sub">· '+label+'</span>' : '')+'</span>'+
+        '<span class="cc-time mono">'+classTimeRange(c)+'</span></div>';
+    };
+    return '<div class="clash-item" data-clashidx="'+i+'">'+
+      '<div class="cc-head"><span class="cc-day">'+day+'</span><span class="cc-overlap">'+overlapText+'</span></div>'+
+      classRow(p[0])+classRow(p[1])+
+      '<div class="cc-actions">'+
+        '<button class="cc-btn" data-clashweek="'+p[0].date+'">See week</button>'+
+        '<button class="cc-btn dismiss" data-clashdismiss="'+i+'">Dismiss</button>'+
+      '</div>'+
+    '</div>';
+  }
+
+  function openClashList(){
+    var pairs = upcomingClashes();
+    if (!pairs.length) return;
+    var overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = '<div class="modal-card clash-modal">'+
+      '<div class="modal-head"><h3>Timing clashes</h3><button class="icon-btn" data-close aria-label="Close">✕</button></div>'+
+      '<div class="ih-hint" style="margin:-6px 0 12px;">Classes that overlap on the same day. Dismiss any that are fine — they\'ll come back if either class\'s time changes.</div>'+
+      '<div class="clash-list">'+pairs.map(clashCardHtml).join("")+'</div>'+
+      (pairs.length > 1 ? '<button class="cc-dismiss-all" id="clashDismissAll">Dismiss all '+pairs.length+'</button>' : '')+
+    '</div>';
+    document.body.appendChild(overlay);
+    function close(){ overlay.remove(); }
+    function afterDismiss(){
+      var left = overlay.querySelectorAll(".clash-item").length;
+      if (!left) return close();
+      var all = overlay.querySelector("#clashDismissAll");
+      if (all){ if (left > 1) all.textContent = "Dismiss all "+left; else all.remove(); }
+    }
+    overlay.addEventListener("click", function(e){ if (e.target === overlay || e.target.closest("[data-close]")) close(); });
+    overlay.querySelectorAll("[data-clashweek]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        close();
+        historyView = "week";
+        historyWeek = mondayOf(btn.getAttribute("data-clashweek"));
+        setTab("history");
+      });
+    });
+    overlay.querySelectorAll("[data-clashdismiss]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        dismissClashes([pairs[Number(btn.getAttribute("data-clashdismiss"))]]);
+        btn.closest(".clash-item").remove();
+        afterDismiss();
+      });
+    });
+    var allBtn = overlay.querySelector("#clashDismissAll");
+    if (allBtn) allBtn.addEventListener("click", function(){
+      var remaining = [].map.call(overlay.querySelectorAll(".clash-item"), function(el){ return pairs[Number(el.getAttribute("data-clashidx"))]; });
+      if (!window.confirm("Dismiss all "+remaining.length+" clashes?")) return;
+      dismissClashes(remaining);
+      close();
+    });
+  }
+
   function findUpNext(){
     var now = new Date();
     var today = toDateStr(now);
@@ -1674,6 +1854,7 @@
     mainEl.innerHTML = '<div class="dash">'+
       '<div class="dash-col col-a">'+
         upNextHtml()+
+        clashAlertHtml()+
         '<div class="period-scroller">'+cardsHtml+'</div>'+
         comingUpHtml()+
       '</div>'+
@@ -1708,6 +1889,8 @@
     mainEl.querySelectorAll(".cu-row[data-detail]").forEach(function(row){
       row.addEventListener("click", function(){ openDetail(row.getAttribute("data-detail")); });
     });
+    var clashBanner = document.getElementById("clashBanner");
+    if (clashBanner) clashBanner.addEventListener("click", openClashList);
     mainEl.querySelectorAll("[data-pay]").forEach(function(btn){
       btn.addEventListener("click", function(){
         var p = btn.getAttribute("data-pay").split("|");
@@ -1878,6 +2061,8 @@
         description: document.getElementById("fDescription").value.trim() || null,
         endDate: document.getElementById("fEndDate").value || null
       };
+      var clashing = clashesWith(fields, null);
+      if (clashing.length && !window.confirm(clashConfirmText(clashing))) return;
       this.disabled = true;
       this.textContent = "Saving…";
       try{
@@ -2102,6 +2287,11 @@
     });
     var totals = periodTotals([historyWeek, weekEnd], historyOrgFilter);
     var hours = inWeek.reduce(function(sum, c){ return sum + (Number(c.durationHours) || 0); }, 0);
+    var clashIds = {};
+    inWeek.forEach(function(c){
+      var live = clashesWith(c, c.id).filter(function(o){ return !isClashDismissed(c, o); });
+      if (live.length) clashIds[c.id] = true;
+    });
 
     var startD = historyWeek.split("-").map(Number), endD = weekEnd.split("-").map(Number);
     var opts = {day:"numeric", month:"short"};
@@ -2121,8 +2311,8 @@
         var meta = orgMeta(c.org);
         var label = classTypeLabel(c);
         var h = Number(c.durationHours) || 0;
-        return '<button class="wk-class" data-wkclass="'+c.id+'">'+
-          '<span class="wk-time mono">'+(formatTime12h(c.startTime) || "—")+'</span>'+
+        return '<button class="wk-class'+(clashIds[c.id]?' is-clash':'')+'" data-wkclass="'+c.id+'"'+(clashIds[c.id]?' title="Overlaps another class"':'')+'>'+
+          '<span class="wk-time mono">'+(clashIds[c.id]?'⚠ ':'')+(formatTime12h(c.startTime) || "—")+'</span>'+
           '<span class="wk-what"><span class="dot" style="background:'+meta.color+'"></span>'+meta.label+(label ? ' <span class="wk-sub">· '+label+'</span>' : '')+'</span>'+
           '<span class="wk-dur mono">'+(h ? (Math.round(h*100)/100)+'h' : '')+'</span>'+
           '<span class="wk-amt mono '+(c.date > today ? "future" : "past")+'">'+fmtMoney(c.income || 0)+'</span>'+
@@ -2373,6 +2563,8 @@
       if (org === "ottodot") updateDoc.rawLabel = labelVal;
       else updateDoc.classLabel = labelVal;
 
+      var clashing = clashesWith(updateDoc, c.id);
+      if (clashing.length && !window.confirm(clashConfirmText(clashing))) return;
       this.disabled = true;
       this.textContent = "Saving…";
       try{
