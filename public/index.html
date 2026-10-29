@@ -4,7 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Teaching Ledger</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%92%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="/icon-192.png" type="image/png">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#0B3F52">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Ledger">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700;800&family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <style>
   :root{
@@ -259,6 +266,8 @@
     .dash .upnext{ padding:13px 16px; }
     .dash .upnext .u-title{ margin:4px 0 2px; }
     .dash .p-row{ padding:3px 0; }
+    .dash .breakdown-row{ padding:8px 0; }
+    .dash .owed-footer{ padding:8px 12px; white-space:nowrap; }
     .dash .period-card .p-combined{ margin-bottom:8px; }
     .dash .period-card{ padding-top:12px; padding-bottom:10px; }
     .dash{
@@ -537,6 +546,17 @@
   }
 
   .trend-card{ cursor:pointer; }
+  .owed-row{ display:flex; align-items:center; gap:8px; padding:7px 0; border-top:1px solid var(--line); font-size:12.5px; }
+  .modal-head + .owed-row{ border-top:none; padding-top:0; }
+  .owed-footer{ display:flex; justify-content:space-between; align-items:center; gap:8px; width:100%; margin-top:10px; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background:var(--surface-2); color:var(--ink); font-size:12px; font-weight:600; cursor:pointer; text-align:left; }
+  .owed-footer b{ color:var(--rose); }
+  .owed-footer.done{ cursor:default; color:var(--accent); font-weight:700; }
+  .owed-name{ flex:1; min-width:0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .owed-month{ color:var(--ink-soft); font-weight:500; font-size:11.5px; }
+  .owed-amt{ font-weight:700; font-size:12px; }
+  .pay-pill{ flex:0 0 auto; border:1px solid var(--line); background:var(--surface-2); color:var(--ink-soft); border-radius:999px; padding:3px 9px; font-size:10.5px; font-weight:700; cursor:pointer; margin-left:6px; }
+  .pay-pill:hover{ border-color:var(--accent); color:var(--accent); }
+  .pay-pill.paid{ background:var(--grad); color:var(--on-gradient); border-color:transparent; }
   .trend-card .see-all{ font-size:11.5px; font-weight:700; color:var(--accent); }
   .income-modal{ max-width:720px; max-height:86vh; }
   .ih-summary{ display:flex; flex-wrap:wrap; gap:6px 18px; font-size:12.5px; color:var(--ink-soft); margin-bottom:14px; }
@@ -634,6 +654,10 @@
 <script>
 (function(){
   "use strict";
+
+  if ("serviceWorker" in navigator){
+    navigator.serviceWorker.register("/sw.js").catch(function(){});
+  }
 
   // ---------------- passcode gate ----------------
   var PASSCODE_HASH = "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4";
@@ -879,6 +903,7 @@
   var customOrgs = [];         // user-added tuition centres, oldest first
   var customOrgsLoaded = false;
   var editingOrgId = null;     // which custom org is being edited in Settings
+  var payments = {};           // "org_YYYY-MM" -> payment marker doc
 
   var mainEl = document.getElementById("main");
   var sectionLabelEl = document.getElementById("sectionLabel");
@@ -923,6 +948,12 @@
       maybeMaterialize();
       renderAll();
     }, function(err){ console.error("orgs onSnapshot", err); });
+
+    db.collection("payments").onSnapshot(function(snap){
+      payments = {};
+      snap.docs.forEach(function(d){ payments[d.id] = d.data(); });
+      renderAll();
+    }, function(err){ console.error("payments onSnapshot", err); });
   }
 
   function activeClasses(){ return classes.filter(function(c){ return !c.deletedAt; }); }
@@ -1289,6 +1320,76 @@
     '</div>';
   }
 
+  // ---- payments: one marker per centre per month ----
+  function isPaid(org, ym){ var p = payments[org+"_"+ym]; return !!(p && p.paid); }
+
+  async function setPaid(org, ym, paid, amount){
+    if (!db) return;
+    try{
+      await db.collection("payments").doc(org+"_"+ym).set({ org:org, ym:ym, paid:paid, amount:amount, updatedAt:Date.now() }, {merge:true});
+      showToast(orgMeta(org).label+" · "+monthLabelShort(ym)+(paid ? " marked paid" : " marked unpaid"));
+    }catch(e){ console.error("setPaid", e); showToast("Couldn't save. Check your connection."); }
+  }
+
+  function monthLabelShort(ym){
+    var p = ym.split("-").map(Number);
+    return new Date(p[0], p[1]-1, 1).toLocaleDateString("en-SG",{month:"short", year:"numeric"});
+  }
+
+  // Finished months (before this one) with income that hasn't been marked paid, oldest first.
+  function owedList(){
+    var thisMonth = todayStr().slice(0,7);
+    var map = {};
+    activeClasses().forEach(function(c){
+      if (!c.date || !c.income) return;
+      var ym = c.date.slice(0,7);
+      if (ym >= thisMonth) return;
+      var key = c.org+"_"+ym;
+      if (!map[key]) map[key] = { org:c.org, ym:ym, amount:0 };
+      map[key].amount += c.income;
+    });
+    return Object.keys(map).map(function(k){ return map[k]; })
+      .filter(function(o){ return o.amount > 0 && !isPaid(o.org, o.ym); })
+      .sort(function(a,b){ return a.ym === b.ym ? (a.org < b.org ? -1 : 1) : (a.ym < b.ym ? -1 : 1); });
+  }
+
+  function owedFooterHtml(){
+    var list = owedList();
+    if (!list.length) return '<div class="owed-footer done">All finished months marked paid ✓</div>';
+    var total = list.reduce(function(sum, o){ return sum + o.amount; }, 0);
+    return '<button class="owed-footer" id="owedMore">'+
+      '<span><span class="dot projected"></span> Unpaid ('+list.length+')</span>'+
+      '<span><b class="mono">'+fmtMoney(total)+'</b> ›</span></button>';
+  }
+
+  function openOwedList(){
+    var list = owedList();
+    var overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = '<div class="modal-card">'+
+      '<div class="modal-head"><h3>Waiting on payment</h3><button class="icon-btn" data-close aria-label="Close">✕</button></div>'+
+      '<div class="ih-hint" style="margin:-6px 0 10px;">Finished months not yet marked paid. Tap Paid? once the money is in.</div>'+
+      list.map(function(o){
+        var meta = orgMeta(o.org);
+        return '<div class="owed-row"><span class="dot" style="background:'+meta.color+'"></span>'+
+          '<span class="owed-name">'+meta.label+' <span class="owed-month">'+monthLabelShort(o.ym)+'</span></span>'+
+          '<span class="owed-amt mono">'+fmtMoney(o.amount)+'</span>'+
+          '<button class="pay-pill" data-pay="'+o.org+'|'+o.ym+'|'+o.amount+'">Paid?</button></div>';
+      }).join("")+
+    '</div>';
+    document.body.appendChild(overlay);
+    function close(){ overlay.remove(); }
+    overlay.addEventListener("click", function(e){ if (e.target === overlay || e.target.closest("[data-close]")) close(); });
+    overlay.querySelectorAll("[data-pay]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var parts = btn.getAttribute("data-pay").split("|");
+        setPaid(parts[0], parts[1], true, Number(parts[2]));
+        btn.closest(".owed-row").remove();
+        if (!overlay.querySelector(".owed-row")) close();
+      });
+    });
+  }
+
   function comingUpHtml(){
     var list = upcomingClasses().slice(1, 4);
     var today = todayStr();
@@ -1441,8 +1542,14 @@
       var combined = v.earned + v.projected;
       if (combined === 0) return "";
       var meta = orgMeta(org);
+      var payPill = "";
+      if (breakdownPeriod === "month" && breakdownMonth < today.slice(0,7) && v.earned > 0){
+        payPill = isPaid(org, breakdownMonth)
+          ? '<button class="pay-pill paid" data-unpay="'+org+'|'+breakdownMonth+'|'+v.earned+'" title="Mark as unpaid">Paid ✓</button>'
+          : '<button class="pay-pill" data-pay="'+org+'|'+breakdownMonth+'|'+v.earned+'" title="Mark as paid">Mark paid</button>';
+      }
       return '<div class="breakdown-row">'+
-        '<div class="org"><span class="dot" style="background:'+meta.color+'"></span>'+meta.label+'</div>'+
+        '<div class="org"><span class="dot" style="background:'+meta.color+'"></span>'+meta.label+payPill+'</div>'+
         '<div class="amounts"><div class="combined mono">'+fmtMoney(combined)+'</div>'+
           '<div class="split mono">'+fmtMoney(v.earned)+' earned · '+fmtMoney(v.projected)+' proj.</div></div>'+
       '</div>';
@@ -1474,6 +1581,7 @@
           monthNavHtml+
           shareBarHtml+
           rowsHtml+
+          owedFooterHtml()+
         '</div>'+
       '</div>'+
       '<div class="dash-col col-c">'+
@@ -1495,6 +1603,20 @@
     mainEl.querySelectorAll(".cu-row[data-detail]").forEach(function(row){
       row.addEventListener("click", function(){ openDetail(row.getAttribute("data-detail")); });
     });
+    mainEl.querySelectorAll("[data-pay]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var p = btn.getAttribute("data-pay").split("|");
+        setPaid(p[0], p[1], true, Number(p[2]));
+      });
+    });
+    mainEl.querySelectorAll("[data-unpay]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var p = btn.getAttribute("data-unpay").split("|");
+        setPaid(p[0], p[1], false, Number(p[2]));
+      });
+    });
+    var owedMore = document.getElementById("owedMore");
+    if (owedMore) owedMore.addEventListener("click", openOwedList);
     var trendCard = document.getElementById("trendCard");
     if (trendCard){
       trendCard.addEventListener("click", openIncomeHistory);
