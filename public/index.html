@@ -341,6 +341,13 @@
     padding:11px 0; border-bottom:1px solid var(--line);
   }
   .breakdown-row:last-child{ border-bottom:none; }
+  .breakdown-row[data-orgtrend]{ cursor:pointer; }
+  .breakdown-row[data-orgtrend]:hover .org{ color:var(--accent); }
+  .ot-trend{ font-size:14px; font-weight:800; margin:-4px 0 4px; }
+  .ot-trend span{ font-size:12px; font-weight:500; color:var(--ink-soft); }
+  .ot-trend.up{ color:var(--accent); }
+  .ot-trend.down{ color:var(--danger); }
+  .ot-trend.flat{ color:var(--ink-soft); font-size:12.5px; font-weight:600; }
   .breakdown-row .org{ display:flex; align-items:center; gap:9px; font-size:13.5px; font-weight:600; }
   .breakdown-row .amounts{ text-align:right; font-size:13px; }
   .breakdown-row .amounts .combined{ font-weight:700; }
@@ -1986,18 +1993,21 @@
       (rows || '<div class="empty-note">Nothing else scheduled yet.</div>')+'</div>';
   }
 
-  function monthTotalsList(fromYm, toYm){
+  function monthTotalsList(fromYm, toYm, org){
     var months = [];
     for (var ym = fromYm; ym <= toYm; ym = shiftMonth(ym, 1)){
-      months.push({ ym:ym, totals: periodTotals(monthRange(ym+"-01")) });
+      months.push({ ym:ym, totals: periodTotals(monthRange(ym+"-01"), org) });
     }
     return months;
   }
 
-  function trendColsHtml(months){
+  // With orgColor set, draws one centre's months in its colour and leaves out the goal line.
+  function trendColsHtml(months, orgColor){
     var thisMonth = todayStr().slice(0,7);
-    var max = Math.max.apply(null, months.map(function(m){ return m.totals.combined; }).concat([monthlyGoal])) || 1;
-    var goalLine = monthlyGoal > 0 ? '<i class="trend-goal" style="bottom:'+(monthlyGoal/max*100)+'%"></i>' : '';
+    var goal = orgColor ? 0 : monthlyGoal;
+    var max = Math.max.apply(null, months.map(function(m){ return m.totals.combined; }).concat([goal])) || 1;
+    var goalLine = goal > 0 ? '<i class="trend-goal" style="bottom:'+(goal/max*100)+'%"></i>' : '';
+    var earnStyle = orgColor ? ' style="flex:FLEX;background:'+orgColor+'"' : ' style="flex:FLEX"';
     return months.map(function(m){
       var t = m.totals;
       var pct = t.combined / max * 100;
@@ -2010,7 +2020,7 @@
         '<span class="trend-area">'+goalLine+
           '<span class="trend-bar" style="height:'+pct+'%">'+
             (t.projected > 0 ? '<i class="proj" style="flex:'+t.projected+'"></i>' : '')+
-            (t.earned > 0 ? '<i class="earn" style="flex:'+t.earned+'"></i>' : '')+
+            (t.earned > 0 ? '<i class="earn"'+earnStyle.replace("FLEX", t.earned)+'></i>' : '')+
           '</span>'+
         '</span>'+
         '<span class="trend-lbl">'+label+'</span>'+
@@ -2159,6 +2169,72 @@
     if (nowCol) chart.scrollLeft = Math.max(0, nowCol.offsetLeft - chart.clientWidth*0.6);
   }
 
+  // One centre's income month by month, with how it's trending.
+  function openOrgTrend(org){
+    var meta = orgMeta(org);
+    var thisMonth = todayStr().slice(0,7);
+    var dates = activeClasses().filter(function(c){ return c.org === org; }).map(function(c){ return c.date; }).sort();
+    var first = dates.length ? dates[0].slice(0,7) : thisMonth;
+    var last = dates.length ? dates[dates.length-1].slice(0,7) : thisMonth;
+    if (first < shiftMonth(thisMonth, -11)) first = shiftMonth(thisMonth, -11);
+    if (last < thisMonth) last = thisMonth;
+    if (last > shiftMonth(thisMonth, 6)) last = shiftMonth(thisMonth, 6);
+    var months = monthTotalsList(first, last, org);
+
+    // Finished months only, so a half-done current month doesn't drag the numbers down.
+    var done = months.filter(function(m){ return m.ym < thisMonth && m.totals.earned > 0; });
+    var sum = function(list){ return list.reduce(function(s, m){ return s + m.totals.earned; }, 0); };
+    var stats = [];
+    if (done.length){
+      var best = done.reduce(function(a, b){ return b.totals.earned > a.totals.earned ? b : a; });
+      stats.push(["Avg per month", fmtWhole(sum(done) / done.length)]);
+      stats.push(["Best month", fmtWhole(best.totals.earned)+" · "+monthLabelShort(best.ym).replace(/ \d{4}$/, "")]);
+    }
+    var trendHtmlOut = '<div class="ot-trend flat">Not enough finished months to show a trend yet.</div>';
+    // Compare the latest finished months with the same number just before them (up to 3 each).
+    var n = Math.min(3, Math.floor(done.length / 2));
+    var recent = done.slice(done.length - n), before = done.slice(done.length - 2*n, done.length - n);
+    if (n > 0){
+      var recentAvg = sum(recent) / recent.length, beforeAvg = sum(before) / before.length;
+      var change = beforeAvg ? Math.round((recentAvg - beforeAvg) / beforeAvg * 100) : 0;
+      var dir = change > 2 ? "up" : change < -2 ? "down" : "flat";
+      trendHtmlOut = '<div class="ot-trend '+dir+'">'+(dir === "up" ? "▲ Up " : dir === "down" ? "▼ Down " : "● Steady ")+
+        (dir === "flat" ? "" : Math.abs(change)+"% ")+'<span>· last '+recent.length+' month'+(recent.length===1?'':'s')+' averaged '+fmtWhole(recentAvg)+
+        ', vs '+fmtWhole(beforeAvg)+' before</span></div>';
+    }
+    var year = thisMonth.slice(0,4);
+    var yearRange = [year+"-01-01", todayStr()];
+    var orgYear = periodTotals(yearRange, org).earned, allYear = periodTotals(yearRange).earned;
+    if (allYear > 0) stats.push(["Share of "+year, Math.round(orgYear / allYear * 100)+"%"]);
+    var upcoming = months.filter(function(m){ return m.ym >= thisMonth; }).reduce(function(s, m){ return s + m.totals.projected; }, 0);
+    stats.push(["Still to come", fmtWhole(upcoming)]);
+
+    var overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = '<div class="modal-card income-modal">'+
+      '<div class="modal-head"><span class="dot" style="background:'+meta.color+';width:10px;height:10px;"></span><h3>'+meta.label+'</h3>'+
+        '<button class="icon-btn" data-close aria-label="Close">✕</button></div>'+
+      trendHtmlOut+
+      '<div class="year-stats">'+stats.map(function(st){
+        return '<div class="ys"><span class="ys-k">'+st[0]+'</span><span class="ys-v mono">'+st[1]+'</span></div>';
+      }).join("")+'</div>'+
+      '<div class="ih-chart"><div class="trend" style="min-width:'+(months.length*46)+'px;height:160px;">'+trendColsHtml(months, meta.color)+'</div></div>'+
+      '<div class="ih-hint"><span class="dot" style="background:'+meta.color+'"></span> Earned &nbsp; <span class="dot projected"></span> Still to come &nbsp;· Tap a month to see its breakdown.</div>'+
+    '</div>';
+    document.body.appendChild(overlay);
+    function close(){ overlay.remove(); }
+    overlay.addEventListener("click", function(e){ if (e.target === overlay || e.target.closest("[data-close]")) close(); });
+    overlay.querySelectorAll("[data-trend]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        breakdownPeriod = "month"; breakdownMonth = btn.getAttribute("data-trend");
+        close(); renderDashboard();
+      });
+    });
+    var chart = overlay.querySelector(".ih-chart");
+    var nowCol = chart.querySelector('[data-trend="'+thisMonth+'"]');
+    if (nowCol) chart.scrollLeft = Math.max(0, nowCol.offsetLeft - chart.clientWidth*0.6);
+  }
+
   function renderDashboard(){
     sectionLabelEl.textContent = "Dashboard";
     var today = todayStr();
@@ -2221,7 +2297,7 @@
           ? '<button class="pay-pill paid" data-unpay="'+org+'|'+breakdownMonth+'|'+v.earned+'" title="Mark as unpaid">Paid ✓</button>'
           : '<button class="pay-pill" data-pay="'+org+'|'+breakdownMonth+'|'+v.earned+'" title="Mark as paid">Mark paid</button>';
       }
-      return '<div class="breakdown-row">'+
+      return '<div class="breakdown-row" data-orgtrend="'+org+'" title="See '+meta.label+' month by month">'+
         '<div class="org"><span class="dot" style="background:'+meta.color+'"></span>'+meta.label+payPill+'</div>'+
         '<div class="amounts"><div class="combined mono">'+fmtMoney(combined)+'</div>'+
           '<div class="split mono">'+fmtMoney(v.earned)+' earned · '+fmtMoney(v.projected)+' proj.</div></div>'+
@@ -2278,6 +2354,12 @@
     if (upNextEl) upNextEl.addEventListener("click", function(){ openDetail(upNextEl.getAttribute("data-detail")); });
     mainEl.querySelectorAll(".cu-row[data-detail]").forEach(function(row){
       row.addEventListener("click", function(){ openDetail(row.getAttribute("data-detail")); });
+    });
+    mainEl.querySelectorAll(".breakdown-row[data-orgtrend]").forEach(function(row){
+      row.addEventListener("click", function(e){
+        if (e.target.closest("button")) return; // paid pills keep their own action
+        openOrgTrend(row.getAttribute("data-orgtrend"));
+      });
     });
     document.getElementById("ratesLink").addEventListener("click", function(){
       var label = breakdownPeriod === "today" ? "Today"
