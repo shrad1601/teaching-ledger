@@ -543,6 +543,15 @@
   .ld-section .ld-sub{ text-transform:none; letter-spacing:0; font-weight:500; }
   .ld-row{ display:flex; align-items:center; gap:8px; padding:7px 0; border-top:1px solid var(--line); font-size:12.5px; }
   .ld-section + .ld-row{ border-top:none; }
+  .rates-modal{ max-width:420px; }
+  .rate-row{ padding:10px 0; border-top:1px solid var(--line); }
+  .modal-card .ih-hint + .rate-row{ border-top:none; padding-top:2px; }
+  .rate-top{ display:flex; align-items:center; gap:8px; }
+  .rate-name{ flex:1; min-width:0; font-size:13.5px; font-weight:700; }
+  .rate-real{ font-size:15px; font-weight:800; color:var(--accent); }
+  .rate-bar{ position:relative; height:7px; border-radius:999px; background:var(--surface-2); margin:7px 0 5px; overflow:hidden; }
+  .rate-bar i{ position:absolute; left:0; top:0; bottom:0; border-radius:999px; }
+  .rate-sub{ font-size:11.5px; color:var(--ink-soft); line-height:1.4; }
   .ld-group{ margin-top:6px; }
   .ld-group-head{ display:flex; align-items:center; gap:8px; padding:8px 0 2px; font-size:13px; }
   .ld-group-head .link-btn{ font-size:11.5px; }
@@ -1009,7 +1018,7 @@
   var breakdownYear = todayStr().slice(0,4); // which year the breakdown shows when period is "year"
   var monthlyGoal = 0;         // target combined income per month (0 = not set)
   var dismissedClashes = {};   // clashKey -> true for clashes the user said are fine
-  var leaves = [];             // overseas trips {id, start, end, label, working, relief:{org:true}}
+  var leaves = [];             // overseas trips {id, start, end, label, working, relief:{classId:true}}
   var leaveDraft = null;       // {start, end, label, working} typed into the trip form, kept across re-renders
   var openLeaveId = null;      // which trip's detail popup is open
   var breakdownMonth = todayStr().slice(0,7); // which month the breakdown shows when period is "month"
@@ -2019,6 +2028,49 @@
       '<div class="trend">'+trendColsHtml(months)+'</div></div>';
   }
 
+  // ---- Hourly rate by centre ----
+  function rateStats(range){
+    var byOrg = {};
+    activeClasses().forEach(function(c){
+      if (c.date < range[0] || c.date > range[1]) return;
+      var s = byOrg[c.org] = byOrg[c.org] || { org:c.org, pay:0, teachHours:0 };
+      s.pay += c.income || 0;
+      s.teachHours += Number(c.durationHours) || 0;
+    });
+    return Object.keys(byOrg).map(function(org){
+      var s = byOrg[org];
+      s.rate = s.teachHours ? s.pay / s.teachHours : 0;
+      return s;
+    }).filter(function(s){ return s.teachHours > 0; })
+      .sort(function(a, b){ return b.rate - a.rate; });
+  }
+  function fmtHours(h){ return (Math.round(h*10)/10)+" h"; }
+
+  function openRates(range, periodLabel){
+    var stats = rateStats(range);
+    var maxRate = stats.reduce(function(m, s){ return Math.max(m, s.rate); }, 0) || 1;
+    var rowsHtml = stats.map(function(s){
+      var meta = orgMeta(s.org);
+      return '<div class="rate-row">'+
+        '<div class="rate-top"><span class="dot" style="background:'+meta.color+'"></span>'+
+          '<span class="rate-name">'+meta.label+'</span>'+
+          '<span class="rate-real mono">'+fmtMoney(s.rate)+'/h</span></div>'+
+        '<div class="rate-bar"><i style="width:'+(s.rate/maxRate*100)+'%;background:'+meta.color+'"></i></div>'+
+        '<div class="rate-sub">'+fmtMoney(s.pay)+' for '+fmtHours(s.teachHours)+'</div>'+
+      '</div>';
+    }).join("") || '<div class="empty-note">No classes in this period.</div>';
+
+    var overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = '<div class="modal-card rates-modal">'+
+      '<div class="modal-head"><h3>Hourly rate by centre</h3><button class="icon-btn" data-close aria-label="Close">✕</button></div>'+
+      '<div class="ih-hint" style="margin:-6px 0 12px;">'+periodLabel+'. Pay divided by hours taught, best first.</div>'+
+      rowsHtml+
+    '</div>';
+    document.body.appendChild(overlay);
+    overlay.addEventListener("click", function(e){ if (e.target === overlay || e.target.closest("[data-close]")) overlay.remove(); });
+  }
+
   // Best month, average month and average hourly rate across a calendar year.
   // Only counts classes already taught, so booked-ahead months don't inflate the stats.
   function yearStatsHtml(year){
@@ -2197,7 +2249,8 @@
       '</div>'+
       '<div class="dash-col col-b">'+
         '<div class="card bd-card">'+
-          '<h2>Breakdown by organisation</h2>'+
+          '<h2 style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">Breakdown by organisation'+
+            '<button class="link-btn" id="ratesLink" style="font-size:11.5px;white-space:nowrap;">$/hour ›</button></h2>'+
           '<div class="seg" style="margin-bottom:12px;">'+
             segBtn("today","Today")+segBtn("week","Week")+segBtn("month","Month")+segBtn("year","Year")+
           '</div>'+
@@ -2225,6 +2278,13 @@
     if (upNextEl) upNextEl.addEventListener("click", function(){ openDetail(upNextEl.getAttribute("data-detail")); });
     mainEl.querySelectorAll(".cu-row[data-detail]").forEach(function(row){
       row.addEventListener("click", function(){ openDetail(row.getAttribute("data-detail")); });
+    });
+    document.getElementById("ratesLink").addEventListener("click", function(){
+      var label = breakdownPeriod === "today" ? "Today"
+        : breakdownPeriod === "week" ? "This week"
+        : breakdownPeriod === "year" ? breakdownYear
+        : new Date(breakdownMonth+"-01T00:00:00").toLocaleDateString("en-SG",{month:"long", year:"numeric"});
+      openRates(rangeForBreakdown, label);
     });
     var clashBanner = document.getElementById("clashBanner");
     if (clashBanner) clashBanner.addEventListener("click", openClashList);
