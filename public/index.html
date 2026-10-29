@@ -304,6 +304,8 @@
   .trend{ display:flex; align-items:flex-end; gap:8px; height:120px; padding-top:4px; }
   .trend-col{ flex:1; min-width:0; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:5px; cursor:pointer; border:none; background:transparent; padding:0; color:var(--ink); }
   .trend-amt{ font-size:10.5px; color:var(--ink-soft); white-space:nowrap; }
+  .trend-area{ position:relative; flex:1; width:100%; display:flex; align-items:flex-end; justify-content:center; }
+  .trend-goal{ position:absolute; left:-4px; right:-4px; height:0; border-top:2px dashed var(--rose); opacity:0.8; z-index:1; pointer-events:none; }
   .trend-bar{ width:100%; max-width:44px; border-radius:8px 8px 4px 4px; overflow:hidden; display:flex; flex-direction:column; background:var(--line); min-height:3px; }
   .trend-bar .proj{ background:var(--rose); opacity:0.75; }
   .trend-bar .earn{ background:var(--grad-bar); }
@@ -546,6 +548,13 @@
   }
 
   .trend-card{ cursor:pointer; }
+  .year-stats{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; margin:10px 0 12px; }
+  .ys{ background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:7px 10px; display:flex; flex-direction:column; gap:2px; }
+  .ys-k{ font-size:9.5px; text-transform:uppercase; letter-spacing:0.1em; color:var(--ink-soft); font-weight:700; }
+  .ys-v{ font-size:12.5px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .goal-status{ font-size:11px; color:var(--ink-soft); margin-bottom:8px; display:flex; align-items:center; gap:6px; }
+  .goal-status .goal-key{ width:14px; border-top:2px dashed var(--rose); }
+  .goal-status.set{ border:none; background:transparent; padding:0; color:var(--accent); font-weight:700; cursor:pointer; }
   .owed-row{ display:flex; align-items:center; gap:8px; padding:7px 0; border-top:1px solid var(--line); font-size:12.5px; }
   .modal-head + .owed-row{ border-top:none; padding-top:0; }
   .owed-footer{ display:flex; justify-content:space-between; align-items:center; gap:8px; width:100%; margin-top:10px; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background:var(--surface-2); color:var(--ink); font-size:12px; font-weight:600; cursor:pointer; text-align:left; }
@@ -560,6 +569,7 @@
   .trend-card .see-all{ font-size:11.5px; font-weight:700; color:var(--accent); }
   .income-modal{ max-width:720px; max-height:86vh; }
   .ih-summary{ display:flex; flex-wrap:wrap; gap:6px 18px; font-size:12.5px; color:var(--ink-soft); margin-bottom:14px; }
+  .goal-key-inline{ display:inline-block; width:14px; border-top:2px dashed var(--rose); vertical-align:middle; }
   .ih-summary b{ color:var(--ink); margin-left:4px; }
   .ih-chart{ overflow-x:auto; padding-bottom:4px; }
   .ih-hint{ font-size:11px; color:var(--ink-soft); margin:8px 0 6px; }
@@ -854,6 +864,7 @@
     var d = new Date(parts[0], parts[1]-1, parts[2]);
     return d.toLocaleDateString("en-SG",{day:"2-digit",month:"short",year:"numeric"});
   }
+  function fmtWhole(n){ return (n<0?"-":"")+"$"+Math.round(Math.abs(n)).toLocaleString("en-SG"); }
   function fmtMoney(n){
     var sign = n<0 ? "-" : "";
     return sign + "$" + Math.abs(n).toLocaleString("en-SG",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -888,7 +899,9 @@
   var classesLoaded = false, seriesLoaded = false, materialized = false;
   var currentTab = "dashboard";
   var addOrg = null;           // which org's add-form is showing
-  var breakdownPeriod = "month"; // today | week | month
+  var breakdownPeriod = "month"; // today | week | month | year
+  var breakdownYear = todayStr().slice(0,4); // which year the breakdown shows when period is "year"
+  var monthlyGoal = 0;         // target combined income per month (0 = not set)
   var breakdownMonth = todayStr().slice(0,7); // which month the breakdown shows when period is "month"
   var historyOrgFilter = "all";
   var historyView = "calendar";    // list | calendar | synclog
@@ -948,6 +961,11 @@
       maybeMaterialize();
       renderAll();
     }, function(err){ console.error("orgs onSnapshot", err); });
+
+    db.doc("settings/goals").onSnapshot(function(snap){
+      monthlyGoal = snap.exists ? (Number(snap.data().monthly) || 0) : 0;
+      renderAll();
+    }, function(err){ console.error("goals onSnapshot", err); });
 
     db.collection("payments").onSnapshot(function(snap){
       payments = {};
@@ -1191,6 +1209,12 @@
     }).join("");
     mainEl.innerHTML =
       '<button class="back-link" id="settingsBack">← Back</button>'+
+      '<div class="card"><h2>Monthly goal</h2>'+
+        '<div class="field" style="margin-bottom:10px;"><label>Target income per month ($)</label>'+
+          '<input type="number" id="goalInput" min="0" step="50" placeholder="3000" value="'+(monthlyGoal > 0 ? monthlyGoal : "")+'"></div>'+
+        '<button id="saveGoalBtn" style="width:100%;background:var(--grad);color:var(--on-gradient);border:none;border-radius:999px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;">Save goal</button>'+
+        '<div class="ih-hint" style="margin-top:8px;">Shown as a dashed line on your monthly income chart. Leave empty to turn it off.</div>'+
+      '</div>'+
       '<div class="card"><h2>Organisation colours</h2>'+
         rows+
         '<button id="resetColorsBtn" style="margin-top:16px;width:100%;background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:999px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;">Reset to defaults</button>'+
@@ -1205,6 +1229,14 @@
       });
     });
     document.getElementById("resetColorsBtn").addEventListener("click", resetOrgColors);
+    document.getElementById("saveGoalBtn").addEventListener("click", async function(){
+      var val = Number(document.getElementById("goalInput").value) || 0;
+      if (val < 0) val = 0;
+      try{
+        await db.doc("settings/goals").set({ monthly: val, updatedAt: Date.now() }, {merge:true});
+        showToast(val > 0 ? "Monthly goal set to "+fmtMoney(val) : "Monthly goal turned off");
+      }catch(e){ console.error("save goal", e); showToast("Couldn't save. Check your connection."); }
+    });
 
     mainEl.querySelectorAll("[data-edit-org]").forEach(function(btn){
       btn.addEventListener("click", function(){ editingOrgId = btn.getAttribute("data-edit-org"); renderSettings(); });
@@ -1417,7 +1449,8 @@
 
   function trendColsHtml(months){
     var thisMonth = todayStr().slice(0,7);
-    var max = Math.max.apply(null, months.map(function(m){ return m.totals.combined; })) || 1;
+    var max = Math.max.apply(null, months.map(function(m){ return m.totals.combined; }).concat([monthlyGoal])) || 1;
+    var goalLine = monthlyGoal > 0 ? '<i class="trend-goal" style="bottom:'+(monthlyGoal/max*100)+'%"></i>' : '';
     return months.map(function(m){
       var t = m.totals;
       var pct = t.combined / max * 100;
@@ -1427,9 +1460,11 @@
       var short = t.combined >= 1000 ? "$"+(t.combined/1000).toFixed(1)+"k" : "$"+Math.round(t.combined);
       return '<button class="trend-col'+(m.ym===thisMonth?" sel":"")+'" data-trend="'+m.ym+'" title="'+fmtMoney(t.combined)+'">'+
         '<span class="trend-amt mono">'+short+'</span>'+
-        '<span class="trend-bar" style="height:'+pct+'%">'+
-          (t.projected > 0 ? '<i class="proj" style="flex:'+t.projected+'"></i>' : '')+
-          (t.earned > 0 ? '<i class="earn" style="flex:'+t.earned+'"></i>' : '')+
+        '<span class="trend-area">'+goalLine+
+          '<span class="trend-bar" style="height:'+pct+'%">'+
+            (t.projected > 0 ? '<i class="proj" style="flex:'+t.projected+'"></i>' : '')+
+            (t.earned > 0 ? '<i class="earn" style="flex:'+t.earned+'"></i>' : '')+
+          '</span>'+
         '</span>'+
         '<span class="trend-lbl">'+label+'</span>'+
       '</button>';
@@ -1441,8 +1476,43 @@
     var months = monthTotalsList(shiftMonth(thisMonth, -5), thisMonth);
     while (months.length > 1 && months[0].totals.combined === 0) months.shift();
     return '<div class="card trend-card" id="trendCard" role="button" tabindex="0">'+
-      '<h2 style="display:flex;justify-content:space-between;align-items:baseline;">Monthly income<span class="see-all">See all ›</span></h2>'+
+      '<h2 style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;">Monthly income<span class="see-all">See all ›</span></h2>'+
+      goalStatusHtml()+
       '<div class="trend">'+trendColsHtml(months)+'</div></div>';
+  }
+
+  // Best month, average month and average hourly rate across a calendar year.
+  // Only counts classes already taught, so booked-ahead months don't inflate the stats.
+  function yearStatsHtml(year){
+    var months = monthTotalsList(year+"-01", year+"-12").filter(function(m){ return m.totals.earned > 0; });
+    if (!months.length) return "";
+    var best = months.reduce(function(a, b){ return b.totals.earned > a.totals.earned ? b : a; });
+    var total = months.reduce(function(sum, m){ return sum + m.totals.earned; }, 0);
+    var today = todayStr();
+    var hours = 0, income = 0;
+    activeClasses().forEach(function(c){
+      if (!c.date || c.date.slice(0,4) !== year || c.date > today) return;
+      var h = Number(c.durationHours) || 0;
+      if (h > 0){ hours += h; income += c.income || 0; }
+    });
+    var stats = [
+      ["Best month", fmtWhole(best.totals.earned)+" · "+monthLabelShort(best.ym).replace(/ \d{4}$/, "")],
+      ["Avg per month", fmtWhole(total / months.length)],
+      ["Avg hourly", hours ? fmtMoney(income / hours)+"/h" : "—"],
+      ["Hours taught", (Math.round(hours*10)/10)+" h"]
+    ];
+    return '<div class="year-stats">'+stats.map(function(st){
+      return '<div class="ys"><span class="ys-k">'+st[0]+'</span><span class="ys-v mono">'+st[1]+'</span></div>';
+    }).join("")+'</div>';
+  }
+
+  function goalStatusHtml(){
+    if (!(monthlyGoal > 0)) return '<button class="goal-status set" id="setGoalLink">Set a monthly goal ›</button>';
+    var t = periodTotals(monthRange(todayStr()));
+    var pct = Math.round(t.combined / monthlyGoal * 100);
+    var left = monthlyGoal - t.combined;
+    return '<div class="goal-status"><span class="goal-key"></span>Goal '+fmtWhole(monthlyGoal)+' · '+pct+'% this month'+
+      (left > 0 ? ' · '+fmtWhole(left)+' to go' : ' · reached')+'</div>';
   }
 
   // Full month-by-month history, from the first month with a class to the last (future months are projected).
@@ -1478,7 +1548,8 @@
       '<div class="modal-card income-modal">'+
         '<div class="modal-head"><h3>Income by month</h3><button class="icon-btn" id="incomeCloseBtn" aria-label="Close">✕</button></div>'+
         '<div class="ih-summary"><div><span class="dot earned"></span> Earned so far <b class="mono">'+fmtMoney(earned)+'</b></div>'+
-          '<div><span class="dot projected"></span> Still to come <b class="mono">'+fmtMoney(projected)+'</b></div></div>'+
+          '<div><span class="dot projected"></span> Still to come <b class="mono">'+fmtMoney(projected)+'</b></div>'+
+          (monthlyGoal > 0 ? '<div><span class="goal-key-inline"></span> Goal <b class="mono">'+fmtWhole(monthlyGoal)+'</b>/month</div>' : '')+'</div>'+
         '<div class="ih-chart"><div class="trend" style="min-width:'+(months.length*46)+'px;height:170px;">'+trendColsHtml(months)+'</div></div>'+
         '<div class="ih-hint">Tap a month to see its breakdown.</div>'+
         '<div class="ih-list">'+rows+'</div>'+
@@ -1521,7 +1592,9 @@
     }).join("");
 
     var breakdownMonthRange = monthRange(breakdownMonth+"-01");
-    var rangeForBreakdown = breakdownPeriod==="today" ? todayRange : breakdownPeriod==="week" ? weekRange : breakdownMonthRange;
+    var breakdownYearRange = [breakdownYear+"-01-01", breakdownYear+"-12-31"];
+    var rangeForBreakdown = breakdownPeriod==="today" ? todayRange : breakdownPeriod==="week" ? weekRange
+      : breakdownPeriod==="year" ? breakdownYearRange : breakdownMonthRange;
     var bd = orgBreakdown(rangeForBreakdown);
 
     var monthNavHtml = "";
@@ -1536,6 +1609,16 @@
           '<button class="icon-btn" id="bdNext" aria-label="Next month">›</button>'+
         '</div>'+
         '<div class="cal-summary">Total <span class="mono">'+fmtMoney(bTotals.combined)+'</span> — '+fmtMoney(bTotals.earned)+' earned · '+fmtMoney(bTotals.projected)+' projected</div>';
+    } else if (breakdownPeriod === "year"){
+      var yTotals = periodTotals(breakdownYearRange);
+      monthNavHtml =
+        '<div class="cal-nav" style="margin-bottom:2px;">'+
+          '<button class="icon-btn" id="bdPrev" aria-label="Previous year">‹</button>'+
+          '<div class="cal-month display">'+breakdownYear+'</div>'+
+          '<button class="icon-btn" id="bdNext" aria-label="Next year">›</button>'+
+        '</div>'+
+        '<div class="cal-summary">Total <span class="mono">'+fmtMoney(yTotals.combined)+'</span> — '+fmtMoney(yTotals.earned)+' earned · '+fmtMoney(yTotals.projected)+' projected</div>'+
+        yearStatsHtml(breakdownYear);
     }
     var rowsHtml = allOrgKeys().map(function(org){
       var v = bd[org] || {earned:0, projected:0};
@@ -1576,7 +1659,7 @@
         '<div class="card bd-card">'+
           '<h2>Breakdown by organisation</h2>'+
           '<div class="seg" style="margin-bottom:12px;">'+
-            segBtn("today","Today")+segBtn("week","Week")+segBtn("month","Month")+
+            segBtn("today","Today")+segBtn("week","Week")+segBtn("month","Month")+segBtn("year","Year")+
           '</div>'+
           monthNavHtml+
           shareBarHtml+
@@ -1629,8 +1712,15 @@
       btn.addEventListener("click", function(){ breakdownPeriod = btn.getAttribute("data-seg"); renderDashboard(); });
     });
     var bdPrev = document.getElementById("bdPrev"), bdNext = document.getElementById("bdNext");
-    if (bdPrev) bdPrev.addEventListener("click", function(){ breakdownMonth = shiftMonth(breakdownMonth,-1); renderDashboard(); });
-    if (bdNext) bdNext.addEventListener("click", function(){ breakdownMonth = shiftMonth(breakdownMonth,1); renderDashboard(); });
+    function shiftBreakdown(delta){
+      if (breakdownPeriod === "year") breakdownYear = String(Number(breakdownYear) + delta);
+      else breakdownMonth = shiftMonth(breakdownMonth, delta);
+      renderDashboard();
+    }
+    if (bdPrev) bdPrev.addEventListener("click", function(){ shiftBreakdown(-1); });
+    if (bdNext) bdNext.addEventListener("click", function(){ shiftBreakdown(1); });
+    var setGoalLink = document.getElementById("setGoalLink");
+    if (setGoalLink) setGoalLink.addEventListener("click", function(e){ e.stopPropagation(); setTab("settings"); });
   }
 
   function quickBtn(org, label){

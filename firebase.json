@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "site": "shraddha-income-tracker",
     "public": "public",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [{ "source": "**", "destination": "/index.html" }],
