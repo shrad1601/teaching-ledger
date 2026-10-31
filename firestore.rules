@@ -1,8 +1,10 @@
 rules_version = '2';
+// Only the ledger owner's Firebase account (email + password) can read or write anything.
+// The app and both Tampermonkey sync scripts sign in as that account.
 service cloud.firestore {
   match /databases/{database}/documents {
     match /{document=**} {
-      allow read, write: if request.auth != null;
+      allow read, write: if request.auth != null && request.auth.uid == "7Ytr6gJJPbbCOpY74ly0fnrehVq2";
     }
   }
 }

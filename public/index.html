@@ -121,7 +121,7 @@
     *{ animation-duration:0.01ms !important; transition-duration:0.01ms !important; }
   }
 
-  /* ---- passcode gate ---- */
+  /* ---- sign-in gate ---- */
   #gate{
     min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;
   }
@@ -138,10 +138,17 @@
   }
   .gate-card p{ font-size:12.5px; color:var(--ink-soft); margin:0 0 18px; }
   .gate-card input{
-    width:100%; font-family:'IBM Plex Mono', monospace; font-size:20px; letter-spacing:0.3em; text-align:center;
-    padding:13px; border-radius:12px; border:1px solid var(--line); background:var(--surface-2); color:var(--ink);
-    margin-bottom:14px;
+    width:100%; font-size:15px;
+    padding:12px 13px; border-radius:12px; border:1px solid var(--line); background:var(--surface-2); color:var(--ink);
+    margin-bottom:10px;
   }
+  .gate-card input + button{ margin-top:4px; }
+  .gate-card button:disabled{ opacity:0.6; cursor:default; }
+  .gate-card .gate-forgot{
+    background:none; box-shadow:none; color:var(--ink-soft); font-size:12px; font-weight:600;
+    padding:6px; margin-top:10px; width:auto;
+  }
+  .gate-note{ color:var(--ink-soft); font-size:12px; margin-top:10px; }
   .gate-card button{
     width:100%; background:var(--grad);
     color:var(--on-gradient); border:none; border-radius:999px; padding:13px; font-size:14px; font-weight:700; cursor:pointer;
@@ -734,15 +741,18 @@
 </head>
 <body>
 
-<div id="gate">
+<div id="gate" hidden>
   <div class="gate-card">
     <h1>Teaching Ledger</h1>
-    <p>Enter your passcode</p>
+    <p>Sign in to see your ledger</p>
     <form id="gateForm">
-      <input type="password" inputmode="numeric" id="gateInput" autocomplete="off" maxlength="20" autofocus>
-      <button type="submit">Unlock</button>
-      <div class="gate-error" id="gateError" hidden>Wrong passcode — try again.</div>
+      <input type="email" id="gateEmail" autocomplete="username" placeholder="Email" required>
+      <input type="password" id="gatePassword" autocomplete="current-password" placeholder="Password" required>
+      <button type="submit" id="gateSubmit">Sign in</button>
+      <div class="gate-error" id="gateError" hidden></div>
+      <div class="gate-note" id="gateNote" hidden></div>
     </form>
+    <button type="button" class="gate-forgot" id="gateForgot">Forgot password?</button>
   </div>
 </div>
 
@@ -798,36 +808,69 @@
     navigator.serviceWorker.register("/sw.js").catch(function(){});
   }
 
-  // ---------------- passcode gate ----------------
-  var PASSCODE_HASH = "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4";
-  async function sha256Hex(str){
-    var enc = new TextEncoder().encode(str);
-    var buf = await crypto.subtle.digest("SHA-256", enc);
-    return Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2,"0"); }).join("");
-  }
+  // ---------------- sign-in gate ----------------
+  // Data is only readable by the owner's Firebase account (see firestore.rules), so the app
+  // signs in with email + password. Firebase keeps the session on this device until sign-out.
+  var appUnlocked = false;
   function unlockApp(){
+    if (appUnlocked) return;
+    appUnlocked = true;
     document.getElementById("gate").hidden = true;
     document.getElementById("app").hidden = false;
     initDb();
     renderAll();
   }
+  function showGate(){
+    document.getElementById("app").hidden = true;
+    document.getElementById("gate").hidden = false;
+  }
+  function gateMessage(err, note){
+    var errEl = document.getElementById("gateError"), noteEl = document.getElementById("gateNote");
+    errEl.hidden = !err; errEl.textContent = err || "";
+    noteEl.hidden = !note; noteEl.textContent = note || "";
+  }
+  function signInErrorText(e){
+    var code = (e && e.code) || "";
+    if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found" || code === "auth/invalid-email")
+      return "Wrong email or password — try again.";
+    if (code === "auth/too-many-requests") return "Too many tries. Wait a few minutes, or reset your password.";
+    if (code === "auth/network-request-failed") return "No connection. Check your internet and try again.";
+    return "Couldn't sign in. Try again.";
+  }
   document.getElementById("gateForm").addEventListener("submit", async function(e){
     e.preventDefault();
-    var val = document.getElementById("gateInput").value;
-    var hash = await sha256Hex(val);
-    if (hash === PASSCODE_HASH){
-      try{ localStorage.setItem("ledgerUnlocked", "1"); }catch(err){}
-      document.getElementById("gateError").hidden = true;
-      unlockApp();
-    } else {
-      document.getElementById("gateError").hidden = false;
+    var btn = document.getElementById("gateSubmit");
+    btn.disabled = true;
+    gateMessage(null, null);
+    try{
+      await firebase.auth().signInWithEmailAndPassword(
+        document.getElementById("gateEmail").value.trim(),
+        document.getElementById("gatePassword").value
+      );
+      document.getElementById("gatePassword").value = "";
+    }catch(err){
+      gateMessage(signInErrorText(err), null);
+    }
+    btn.disabled = false;
+  });
+  document.getElementById("gateForgot").addEventListener("click", async function(){
+    var email = document.getElementById("gateEmail").value.trim();
+    if (!email){ gateMessage("Type your email above first.", null); return; }
+    try{
+      await firebase.auth().sendPasswordResetEmail(email);
+      gateMessage(null, "If that's your account email, a reset link is on its way.");
+    }catch(err){
+      gateMessage(err && err.code === "auth/invalid-email" ? "That email doesn't look right." : "Couldn't send the reset email. Try again.", null);
     }
   });
-  (function checkRemembered(){
-    var already = false;
-    try{ already = localStorage.getItem("ledgerUnlocked") === "1"; }catch(err){}
-    if (already) unlockApp();
-  })();
+  firebase.auth().onAuthStateChanged(function(user){
+    // Older versions of the app signed in anonymously; those sessions can't read anything any more.
+    if (user && user.isAnonymous){ firebase.auth().signOut(); return; }
+    if (user) unlockApp();
+    else if (appUnlocked) location.reload();
+    else showGate();
+  });
+  try{ localStorage.removeItem("ledgerUnlocked"); }catch(err){}
 
   // ---------------- Rate constants ----------------
   var MASTERMATHS_RATE = 50;
@@ -1060,10 +1103,8 @@
   var sectionLabelEl = document.getElementById("sectionLabel");
 
   // ---------------- db init ----------------
+  // Called once the owner is signed in (see the sign-in gate).
   async function initDb(){
-    try{
-      await firebase.auth().signInAnonymously();
-    }catch(e){ console.error("auth failed", e); renderAll(); return; }
     db = firebase.firestore();
 
     db.collection("classes").onSnapshot(function(snap){
@@ -1932,6 +1973,14 @@
     });
   }
 
+  function renderAccountSection(){
+    var user = firebase.auth().currentUser;
+    return '<div class="card"><h2>Account</h2>'+
+      '<div class="ih-hint" style="margin:-4px 0 12px;">Signed in as '+escapeHtml(user && user.email || "")+'</div>'+
+      '<button id="signOutBtn" style="width:100%;background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:999px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;">Sign out</button>'+
+    '</div>';
+  }
+
   function renderSettings(){
     sectionLabelEl.textContent = "Settings";
     var rows = ORG_ORDER.map(function(org){
@@ -1956,7 +2005,8 @@
         rows+
         '<button id="resetColorsBtn" style="margin-top:16px;width:100%;background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:999px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;">Reset to defaults</button>'+
       '</div>'+
-      renderCustomOrgsSection();
+      renderCustomOrgsSection()+
+      renderAccountSection();
     document.getElementById("settingsBack").addEventListener("click", function(){ setTab("dashboard"); });
     mainEl.querySelectorAll(".color-input[data-org]").forEach(function(inp){
       inp.addEventListener("input", function(){
@@ -1968,6 +2018,10 @@
     document.getElementById("resetColorsBtn").addEventListener("click", resetOrgColors);
     bindLeaveSection();
     bindExportSection();
+    document.getElementById("signOutBtn").addEventListener("click", function(){
+      if (!window.confirm("Sign out of Teaching Ledger on this device?")) return;
+      firebase.auth().signOut();
+    });
     document.getElementById("saveGoalBtn").addEventListener("click", async function(){
       var val = Number(document.getElementById("goalInput").value) || 0;
       if (val < 0) val = 0;

@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         Ottodot Airtable -> Teaching Ledger Sync
 // @namespace    shraddha-teaching-ledger
-// @version      1.2
+// @version      1.3
 // @description  Reads your Ottodot Airtable schedule and writes classes straight into your Teaching Ledger (Firestore). No copy-paste.
 // @match        https://airtable.com/apptZFP6ejwcRA6Il/*
-// @grant        none
+// @grant        GM_getValue
+// @grant        GM_setValue
 // ==/UserScript==
 
 (function () {
@@ -41,18 +42,81 @@
   }
   function normalizeName(s) { return String(s || "").replace(/\s+/g, " ").trim().toLowerCase(); }
 
-  // ---------------- Firebase auth (anonymous, REST) ----------------
-  var idToken = null;
-  async function ensureAuth() {
-    if (idToken) return idToken;
-    var res = await fetch(
-      "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=" + FIREBASE_API_KEY,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ returnSecureToken: true }) }
-    );
-    var data = await res.json();
-    if (!data.idToken) throw new Error("Firebase auth failed: " + JSON.stringify(data));
-    idToken = data.idToken;
+  // ---------------- Firebase auth (owner account, REST) ----------------
+  // The ledger only lets its owner's account in (see firestore.rules). The first sync asks for
+  // the ledger's email + password once; after that only Firebase's refresh token is kept, in
+  // Tampermonkey's own storage (never the password, and never in this site's localStorage).
+  var REFRESH_TOKEN_KEY = "tlRefreshToken";
+  var idToken = null, idTokenExpiresAt = 0;
+  function rememberToken(token, refreshToken, expiresInSec) {
+    idToken = token;
+    idTokenExpiresAt = Date.now() + (Number(expiresInSec) || 3600) * 1000 - 60000;
+    GM_setValue(REFRESH_TOKEN_KEY, refreshToken);
     return idToken;
+  }
+  async function tokenFromRefresh(refreshToken) {
+    var res = await fetch("https://securetoken.googleapis.com/v1/token?key=" + FIREBASE_API_KEY, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "grant_type=refresh_token&refresh_token=" + encodeURIComponent(refreshToken)
+    });
+    var data = await res.json();
+    return data.id_token ? rememberToken(data.id_token, data.refresh_token, data.expires_in) : null;
+  }
+  async function signInWithPassword(email, password) {
+    var res = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=" + FIREBASE_API_KEY, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email, password: password, returnSecureToken: true })
+    });
+    var data = await res.json();
+    if (!data.idToken) {
+      var msg = data.error ? data.error.message : "";
+      if (/INVALID_LOGIN_CREDENTIALS|INVALID_PASSWORD|EMAIL_NOT_FOUND|INVALID_EMAIL/.test(msg)) throw new Error("Wrong email or password.");
+      throw new Error("Firebase sign-in failed: " + (msg || "unknown error"));
+    }
+    return rememberToken(data.idToken, data.refreshToken, data.expiresIn);
+  }
+  // Centred sign-in form; resolves with {email, password}, rejects if cancelled.
+  function askCredentials() {
+    return new Promise(function (resolve, reject) {
+      var inputCss = "display:block;width:100%;box-sizing:border-box;margin-bottom:8px;padding:9px 10px;border-radius:8px;border:1px solid #555;background:#2A3430;color:#fff;font-size:14px;";
+      var btnCss = "flex:1;padding:10px;border:none;border-radius:8px;font-weight:700;cursor:pointer;";
+      var overlay = document.createElement("div");
+      overlay.style.cssText = "position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font-family:sans-serif;";
+      overlay.innerHTML =
+        '<form style="background:#1B2420;color:#fff;border-radius:12px;padding:18px;width:280px;box-shadow:0 8px 24px rgba(0,0,0,.3);">' +
+          '<div style="font-weight:700;margin-bottom:4px;">Sign in to Teaching Ledger</div>' +
+          '<div style="font-size:12px;opacity:.8;margin-bottom:12px;">Same email and password as the app. Only needed once on this browser.</div>' +
+          '<input name="email" type="email" autocomplete="username" placeholder="Email" required style="' + inputCss + '">' +
+          '<input name="password" type="password" autocomplete="current-password" placeholder="Password" required style="' + inputCss + '">' +
+          '<div style="display:flex;gap:8px;margin-top:4px;">' +
+            '<button type="button" data-cancel style="' + btnCss + 'background:#3A4440;color:#fff;">Cancel</button>' +
+            '<button type="submit" style="' + btnCss + 'background:#7C3FA0;color:#fff;">Sign in</button>' +
+          '</div>' +
+        '</form>';
+      var form = overlay.querySelector("form");
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        var creds = { email: form.email.value.trim(), password: form.password.value };
+        overlay.remove();
+        resolve(creds);
+      });
+      overlay.querySelector("[data-cancel]").addEventListener("click", function () {
+        overlay.remove();
+        reject(new Error("Sign-in cancelled."));
+      });
+      document.body.appendChild(overlay);
+      form.email.focus();
+    });
+  }
+  async function ensureAuth() {
+    if (idToken && Date.now() < idTokenExpiresAt) return idToken;
+    var saved = GM_getValue(REFRESH_TOKEN_KEY, null);
+    if (saved && await tokenFromRefresh(saved)) return idToken;
+    GM_setValue(REFRESH_TOKEN_KEY, null);
+    var creds = await askCredentials();
+    return signInWithPassword(creds.email, creds.password);
   }
 
   function toFirestoreValue(v) {

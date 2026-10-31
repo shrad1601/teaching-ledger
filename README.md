@@ -1,8 +1,8 @@
 # Teaching Ledger
 
 Personal income tracker across Mind Stretcher, Ottodot, Mastermaths, Bluetree,
-PrimePlus and any centres added in Settings. Firebase Hosting + Firestore,
-gated by a shared passcode. Installable to the phone home screen as an app.
+PrimePlus and any centres added in Settings. Firebase Hosting + Firestore, with
+the owner signing in by email + password. Installable to the phone home screen as an app.
 
 Live at: https://shraddha-income-tracker.web.app
 
@@ -37,9 +37,18 @@ Live at: https://shraddha-income-tracker.web.app
   - It loads `jsPDF` from cdnjs only when exporting a PDF.
 - `public/manifest.json`, `public/sw.js` and the icons make it installable.
   - The service worker caches nothing, so new deploys show up straight away.
-- `firestore.rules`: the access rule is `request.auth != null`, i.e. anyone who's passed the app's passcode gate and signed in anonymously.
+- `firestore.rules`: only the owner's Firebase account (matched by UID) can read or write.
 - `mindstretcher-sync.user.js`: Tampermonkey script that runs on Dash (`dash.mindstretcher.com`). It reads the schedule and attendance, then writes classes straight into Firestore.
 - `ottodot-sync.user.js`: Tampermonkey script that does the same from Ottodot's Airtable schedule.
+- Sign-in for the sync scripts:
+  - The first sync asks for the ledger's email + password.
+  - After that, only Firebase's refresh token is kept, in Tampermonkey storage.
+
+## Sign-in
+
+- Firebase Auth uses Email/Password with a single account. Create it in Firebase Console → Authentication → Users.
+- Put that account's UID in `firestore.rules`.
+- The app stays signed in on each device until you sign out in Settings → Account.
 - `scripts/`: one-off/admin Node scripts (data migration, rules deploy, API key fixes). They're not part of the running app.
 
 ### Firestore collections
