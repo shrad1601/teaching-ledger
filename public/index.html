@@ -1101,6 +1101,45 @@
     return c.classLabel || null;
   }
 
+  // Where a class happens: mode "online" | "physical", plus an optional place (e.g. "Katong").
+  // Ottodot and PrimePlus are always online; custom centres can carry their own default mode.
+  var ORG_DEFAULT_MODE = { ottodot:"online", primeplus:"online" };
+  function defaultMode(org){
+    if (ORG_DEFAULT_MODE[org]) return ORG_DEFAULT_MODE[org];
+    var custom = findCustomOrg(org);
+    return custom && custom.mode || null;
+  }
+  function classMode(c){ return c.mode || defaultMode(c.org); }
+  function whereLabel(c){
+    var mode = classMode(c);
+    if (mode === "online") return "Online";
+    if (mode === "physical") return c.place ? c.place : "Physical";
+    return null;
+  }
+  function modeFieldHtml(prefix, mode, place){
+    return '<div class="field"><label>Where</label><div class="choice-row" id="'+prefix+'ModeChoice">'+
+        '<button data-val="online" class="'+(mode==="online"?"active":"")+'">Online</button>'+
+        '<button data-val="physical" class="'+(mode==="physical"?"active":"")+'">Physical</button>'+
+      '</div></div>'+
+      '<div class="field" id="'+prefix+'PlaceField"'+(mode==="physical"?"":" hidden")+'><label>Place (optional)</label>'+
+        '<input type="text" id="'+prefix+'Place" placeholder="e.g. Katong" value="'+String(place||"").replace(/"/g,"&quot;")+'"></div>';
+  }
+  // Wires the Where buttons; returns a function that reads {mode, place}.
+  function wireModeField(prefix, mode){
+    document.querySelectorAll("#"+prefix+"ModeChoice button").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        document.querySelectorAll("#"+prefix+"ModeChoice button").forEach(function(b){ b.classList.remove("active"); });
+        btn.classList.add("active");
+        mode = btn.getAttribute("data-val");
+        document.getElementById(prefix+"PlaceField").hidden = mode !== "physical";
+      });
+    });
+    return function(){
+      var place = mode === "physical" ? document.getElementById(prefix+"Place").value.trim() : "";
+      return { mode: mode || null, place: place || null };
+    };
+  }
+
   // ---------------- state ----------------
   var db = null;
   var classes = [];      // loaded from db
@@ -1308,6 +1347,8 @@
       studentCount: s.studentCount || null,
       classLabel: s.classLabel || null,
       description: s.description || null,
+      mode: s.mode || null,
+      place: s.place || null,
       rate: computed.rate,
       income: computed.income,
       source: "manual-recurring",
@@ -1366,6 +1407,8 @@
       studentCount: fields.studentCount || null,
       classLabel: fields.classLabel || null,
       description: fields.description || null,
+      mode: fields.mode || null,
+      place: fields.place || null,
       active: true,
       startDate: fields.date,
       endDate: fields.endDate || null,
@@ -3034,6 +3077,7 @@
         '<div class="field"><label>Duration (hours)</label><input type="number" id="fDuration" min="0.25" step="0.25" value="1"></div>'+
         '<div class="field"><label>Class / level (optional)</label><input type="text" id="fClassLabel" placeholder="e.g. P4 Math"></div>'+
         '<div class="field"><label>Description / notes (optional)</label><input type="text" id="fDescription" placeholder="anything worth remembering about this class"></div>'+
+        modeFieldHtml("f", defaultMode(org), null)+
         extraFieldsHtml+
         '<div class="toggle-row"><span class="t-label">Repeats weekly</span><button class="switch" id="fRecurring"><span class="knob"></span></button></div>'+
         '<div class="field" id="endDateField" hidden><label>Ends on (optional)</label><input type="date" id="fEndDate"></div>'+
@@ -3044,6 +3088,7 @@
     document.getElementById("backBtn").addEventListener("click", function(){ addOrg=null; renderAdd(); });
 
     var recurringOn = false;
+    var readWhere = wireModeField("f", defaultMode(org));
     var levelVal = org==="mindstretcher" ? MINDSTRETCHER_LEVELS[0].key : "primary";
     var catVal = org==="primeplus" ? "1-1" : null;
 
@@ -3100,6 +3145,7 @@
         description: document.getElementById("fDescription").value.trim() || null,
         endDate: document.getElementById("fEndDate").value || null
       };
+      Object.assign(fields, readWhere());
       var clashing = clashesWith(fields, null);
       if (clashing.length && !window.confirm(clashConfirmText(clashing))) return;
       this.disabled = true;
@@ -3455,6 +3501,7 @@
     var typeLabel = classTypeLabel(c);
     if (typeLabel) subBits.push(typeLabel);
     if (c.category) subBits.push(PRIMEPLUS_LABELS[c.category] || c.category);
+    if (whereLabel(c) && (c.place || classMode(c) !== defaultMode(c.org))) subBits.push(whereLabel(c)); // "Online" for Ottodot is a given
     if (c.studentCount) subBits.push(c.studentCount + " students");
     if (c.startTime) subBits.push(formatTime12h(c.startTime));
     var seriesBtn = c.seriesId ? '<button class="icon-btn" title="Stop repeating" data-stop="'+c.seriesId+'">⟲</button>' : "";
@@ -3489,6 +3536,8 @@
     if (c.durationHours) rows.push(["Duration", c.durationHours + " hr" + (Number(c.durationHours)===1?"":"s")]);
     var typeLabel = classTypeLabel(c);
     if (typeLabel) rows.push(["Class / level", typeLabel]);
+    var where = whereLabel(c);
+    rows.push(["Where", where ? (classMode(c)==="physical" && c.place ? "Physical · "+c.place : where) : "Not set"]);
     if (c.category) rows.push(["Category", PRIMEPLUS_LABELS[c.category] || c.category]);
     if (c.studentCount != null) rows.push(["Students", c.studentCount]);
     if (c.weekdayOrWeekend) rows.push(["Day type", c.weekdayOrWeekend]);
@@ -3540,6 +3589,7 @@
       '<div class="field"><label>Duration (hours)</label><input type="number" id="editDuration" min="0.25" step="0.25" value="'+(c.durationHours||1)+'"></div>'+
       '<div class="field"><label>Class / level (optional)</label><input type="text" id="editClassLabel" value="'+attrEscape(labelValue)+'"></div>'+
       '<div class="field"><label>Description / notes (optional)</label><input type="text" id="editDescription" value="'+attrEscape(c.description||"")+'"></div>'+
+      modeFieldHtml("edit", classMode(c), c.place)+
       extraFieldsHtml+
       '<div class="rate-preview"><span>Estimated pay</span><span class="mono" id="editRatePreview">'+fmtMoney(c.income||0)+'</span></div>'+
       '<div class="modal-actions"><button class="icon-btn" id="editCancelBtn">Cancel</button><button class="icon-btn" id="editSaveBtn">Save changes</button></div>'+
@@ -3554,6 +3604,7 @@
 
     var levelVal = org==="mindstretcher" ? (c.level || MINDSTRETCHER_LEVELS[0].key) : (c.category==="secondary" ? "secondary" : "primary");
     var catVal = org==="primeplus" ? (c.category || "1-1") : null;
+    var readWhere = wireModeField("edit", classMode(c));
 
     function currentFields(){
       return {
@@ -3613,6 +3664,7 @@
         rate: computed.rate,
         income: computed.income
       };
+      Object.assign(updateDoc, readWhere());
       if (org === "ottodot") updateDoc.rawLabel = labelVal;
       else updateDoc.classLabel = labelVal;
 
@@ -3646,7 +3698,9 @@
       category: c.category || null,
       studentCount: c.studentCount || null,
       classLabel: c.classLabel || null,
-      description: c.description || null
+      description: c.description || null,
+      mode: c.mode || null,
+      place: c.place || null
     };
     if (c.rawLabel) fields.rawLabel = c.rawLabel;
     var computed = computeIncome(c.org, fields);

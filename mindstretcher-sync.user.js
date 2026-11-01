@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mind Stretcher -> Teaching Ledger Sync
 // @namespace    shraddha-teaching-ledger
-// @version      1.4
+// @version      1.5
 // @description  Reads your Dash schedule + attendance and writes classes straight into your Teaching Ledger (Firestore). No copy-paste.
 // @match        https://dash.mindstretcher.com/teacher/my-schedule/*
 // @grant        GM_getValue
@@ -301,7 +301,10 @@
         var sessionId = card.getAttribute("data-session-id");
         var parsedMeta = parseMeta(meta);
         if (!sessionId || !parsedMeta) return;
+        var details = cardDetails(card, title);
         sessions.push({
+          venue: details.venue,
+          relief: details.relief,
           sessionId: sessionId,
           title: title,
           date: dayDates[i],
@@ -312,6 +315,29 @@
       });
     });
     return sessions;
+  }
+
+  // The card's small text pieces: a "RELIEF" / "ONLINE" badge, the time, the title, and the venue line
+  // ("Online", "Katong", "West Campus"). The venue is the one piece that isn't a badge, time or title.
+  function cardDetails(card, title) {
+    var bits = [];
+    card.querySelectorAll("*").forEach(function (el) {
+      if (el.children.length) return;
+      var t = (el.textContent || "").replace(/\s+/g, " ").trim();
+      if (t) bits.push(t);
+    });
+    var relief = bits.some(function (t) { return /^relief$/i.test(t); });
+    var isBadge = function (t) { return /^[A-Z][A-Z \-]{1,20}$/.test(t); };
+    var isTime = function (t) { return /\d{1,2}:\d{2}\s*[AP]M/i.test(t); };
+    var venue = null;
+    for (var i = 0; i < bits.length; i++) {
+      var t = bits[i];
+      if (t === title.trim() || isBadge(t) || isTime(t) || /^relief$/i.test(t)) continue;
+      venue = t;
+      break;
+    }
+    if (!venue && bits.some(function (t) { return /^online$/i.test(t); })) venue = "Online";
+    return { venue: venue, relief: relief };
   }
 
   async function fetchAttendance(sessionId) {
@@ -451,7 +477,7 @@
               changes.push({ type: "updated", docId: docId, classLabel: s.title, date: s.date, income: income, fromIncome: existing.income });
             }
 
-            await writeClassDoc(docId, {
+            var doc = {
               org: "mindstretcher",
               date: s.date,
               startTime: s.startTime,
@@ -465,8 +491,16 @@
               source: "synced-mindstretcher",
               seriesId: null,
               deletedAt: null,
-              createdAt: Date.now()
-            });
+              createdAt: Date.now(),
+              relief: s.relief
+            };
+            // Where the class is, as Dash shows it. Left alone if the card has no venue line.
+            if (s.venue) {
+              var online = /^online$/i.test(s.venue);
+              doc.mode = online ? "online" : "physical";
+              doc.place = online ? null : s.venue;
+            }
+            await writeClassDoc(docId, doc);
             written++;
           }
         }

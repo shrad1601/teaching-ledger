@@ -19,6 +19,7 @@ Live at: https://shraddha-income-tracker.web.app
   - Clash warnings: a banner when upcoming classes overlap. Each clash can be dismissed.
   - Relief reminder for overseas trips where classes still need cover.
 - **Add**: one-off or weekly classes. Pay is worked out from each centre's rates. You're warned before saving a class that overlaps another.
+  - Where: online or physical, with an optional place. Ottodot and PrimePlus are always online; custom centres can have a default.
 - **History**
   - list, week and calendar views, filterable by centre
   - tap a class to edit it, or copy it to other dates (pick days on a calendar or "every week for 4 weeks"; pay is worked out for each date)
@@ -32,6 +33,10 @@ Live at: https://shraddha-income-tracker.web.app
     - Working: classes count as usual.
     - Not working: classes are dropped from income. Relief is tracked per class.
   - Centre colours and custom centres.
+- **Google Calendar**: every class is mirrored into a shared Google Calendar within seconds (see `functions/`).
+  - Titles are short: `MS · P5 Science · Katong`, `Otto · P4 Sci`. The place only shows when it isn't the centre's usual.
+  - Regular classes are Peacock (blue), relief classes Lavender (purple). Mind Stretcher uses Dash's RELIEF tag.
+  - Classes on not-working trips are left off. Events added by hand in the calendar are never touched.
 
 ## Structure
 
@@ -41,8 +46,15 @@ Live at: https://shraddha-income-tracker.web.app
 - `public/manifest.json`, `public/sw.js` and the icons make it installable.
   - The service worker caches nothing, so new deploys show up straight away.
 - `firestore.rules`: only the owner's Firebase account (matched by UID) can read or write.
-- `mindstretcher-sync.user.js`: Tampermonkey script that runs on Dash (`dash.mindstretcher.com`). It reads the schedule and attendance, then writes classes straight into Firestore.
+- `mindstretcher-sync.user.js`: Tampermonkey script that runs on Dash (`dash.mindstretcher.com`). It reads the schedule (including each class's venue and RELIEF tag) and attendance, then writes classes straight into Firestore.
 - `ottodot-sync.user.js`: Tampermonkey script that does the same from Ottodot's Airtable schedule.
+- `functions/`: Cloud Functions (2nd gen, `asia-southeast1`) that keep the Google Calendar in step with `classes`.
+  - `calendarSyncClass`: on any class write, updates that class's event (and the same slot a week either side, for the blue/purple colour).
+  - `calendarSyncLeaves` / `calendarSyncOrgs`: recheck the whole calendar when a trip or custom centre changes.
+  - `calendarNightly`: full recheck at 4am Singapore time.
+  - Runs as the `firebase-adminsdk-fbsvc` service account, which the calendar is shared with ("Make changes to events") and which has Eventarc Event Receiver + Cloud Run Invoker on the project.
+  - `CALENDAR_ID` goes in `functions/.env` (not committed).
+  - `resync-local.js` rechecks the calendar from your Mac (`--dry-run` to preview). `import-timetree.js` was a one-off import of a TimeTree export with label colours and reminders.
 - Sign-in for the sync scripts:
   - The first sync asks for the ledger's email + password.
   - After that, only Firebase's refresh token is kept, in Tampermonkey storage.
@@ -58,9 +70,9 @@ Live at: https://shraddha-income-tracker.web.app
 
 | Collection / doc   | What it holds                                                    |
 | ------------------ | ---------------------------------------------------------------- |
-| `classes`          | One doc per class: org, date, time, hours, rate, income. Soft-deleted with `deletedAt`. |
+| `classes`          | One doc per class: org, date, time, hours, rate, income, `mode` (online/physical), `place`, `relief` (MS). Soft-deleted with `deletedAt`. |
 | `series`           | Weekly repeating classes, expanded into `classes` up to a year ahead. |
-| `orgs`             | Custom centres (name, hourly rate, colour).                       |
+| `orgs`             | Custom centres (name, hourly rate, colour, optional `short` name for the calendar and default `mode`). |
 | `payments`         | `{org}_{YYYY-MM}`: whether that centre's month has been paid.     |
 | `leaves`           | Overseas trips: dates, working or not, per-class relief ticks.    |
 | `syncRuns`         | Log of each Tampermonkey sync.                                    |
@@ -97,4 +109,5 @@ python3 -m http.server 5173 --directory public
 
 ```bash
 npx firebase-tools deploy --only hosting --project shraddha-income-tracker
+npx firebase-tools deploy --only functions --project shraddha-income-tracker
 ```
