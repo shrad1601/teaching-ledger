@@ -1,0 +1,17 @@
+{
+  "name": "teaching-ledger-functions",
+  "description": "Mirrors ledger classes into the shared Google Calendar",
+  "private": true,
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "resync": "node resync-local.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.5.0",
+    "firebase-functions": "^7.4.0",
+    "google-auth-library": "^11.3.2"
+  }
+}
