@@ -45,7 +45,7 @@ function className(c) {
   // Just the class: "P5 Science (GEP/High Achiever)" → "P5 Science".
   if (label) label = label.replace(/\s*\(.*?\)\s*/g, " ").replace(/English And Language Arts/i, "English").trim();
   if (label) bits.push(label);
-  let name = bits.join(" · ");
+  let name = bits.join(" ");
   if (c.description && /trial/i.test(c.description)) name += " (trial)";
   return name;
 }
@@ -80,7 +80,7 @@ function eventFor(c, leaves, orgs, slots) {
     : mode === usual ? null
     : mode === "online" ? "Online" : mode === "physical" ? "Physical" : null;
   const event = {
-    summary: [centre, className(c), where].filter(Boolean).join(" · "),
+    summary: [centre, className(c), where].filter(Boolean).join(" "),
     location: mode === "online" ? "Online" : (mode === "physical" && c.place) || "",
     colorId: isRegular(c, slots) ? REGULAR_COLOR_ID : RELIEF_COLOR_ID,
     status: "confirmed",

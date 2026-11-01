@@ -34,7 +34,7 @@ Live at: https://shraddha-income-tracker.web.app
     - Not working: classes are dropped from income. Relief is tracked per class.
   - Centre colours and custom centres.
 - **Google Calendar**: every class is mirrored into a shared Google Calendar within seconds (see `functions/`).
-  - Titles are short: `MS · P5 Science · Katong`, `Otto · P4 Sci`. The place only shows when it isn't the centre's usual.
+  - Titles are short: `MS P5 Science Katong`, `Otto P4 Sci`. The place only shows when it isn't the centre's usual.
   - Regular classes are Peacock (blue), relief classes Lavender (purple). Mind Stretcher uses Dash's RELIEF tag.
   - Classes on not-working trips are left off. Events added by hand in the calendar are never touched.
 
