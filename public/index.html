@@ -433,6 +433,12 @@
   }
   .export-btn small{ font-size:10.5px; font-weight:600; opacity:0.85; }
   .export-btn:disabled{ opacity:0.45; cursor:default; }
+  .ts-nav{ margin-bottom:10px; }
+  .ts-rows{ border:1px solid var(--line); border-radius:12px; overflow:hidden; margin-bottom:12px; }
+  .ts-row{ display:flex; justify-content:space-between; gap:12px; padding:9px 12px; font-size:12.5px; border-top:1px solid var(--line); }
+  .ts-row:first-child{ border-top:none; }
+  .ts-row span:last-child{ white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .ts-total{ font-weight:800; background:var(--surface-2); }
 
   .class-list{ display:flex; flex-direction:column; gap:8px; }
   .class-item{
@@ -1110,6 +1116,8 @@
   var leaveDraft = null;       // {start, end, label, working} typed into the trip form, kept across re-renders
   var openLeaveId = null;      // which trip's detail popup is open
   var exportPeriod = "thisMonth"; // thisMonth | lastMonth | thisYear | lastYear | all
+  // "YYYY-MM" for the PrimePlus timesheet: last month until the 15th, then this month
+  var timesheetMonth = Number(todayStr().slice(8,10)) <= 15 ? addDays(monthRange(todayStr())[0], -1).slice(0,7) : todayStr().slice(0,7);
   var breakdownMonth = todayStr().slice(0,7); // which month the breakdown shows when period is "month"
   var historyOrgFilter = "all";
   var historyView = "calendar";    // list | week | calendar | synclog
@@ -2004,6 +2012,139 @@
     });
   }
 
+  // ---------------- PrimePlus timesheet ----------------
+  // Fills PrimePlus's own invoice template (public/primeplus-timesheet.xlsx): one table row per kind of
+  // class, with the number of lessons and the hourly rate. JSZip is fetched only when it's needed.
+  var TIMESHEET_FIRST_ROW = 15, TIMESHEET_LAST_ROW = 25, TIMESHEET_TOTAL_ROW = 26;
+  var jszipPromise = null;
+  function loadJsZip(){
+    if (!jszipPromise){
+      jszipPromise = loadScript("https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js")
+        .catch(function(e){ jszipPromise = null; throw e; });
+    }
+    return jszipPromise;
+  }
+  function monthLabelLong(ym){
+    var p = ym.split("-").map(Number);
+    return new Date(p[0], p[1]-1, 1).toLocaleDateString("en-SG",{month:"long", year:"numeric"});
+  }
+  function fmtLessonLength(hours){
+    var mins = Math.round(hours*60);
+    var h = Math.floor(mins/60), m = mins%60;
+    return (h ? h+"h" : "")+(h && m ? " " : "")+(m ? m+"m" : "");
+  }
+  // The month's PrimePlus classes grouped by class name, type and length, e.g.
+  // {name:"P3 Math Olympiad · 1-to-1 · 1h 15m", lessons:2, rate:40, perLesson:50, income:100}. rate is per hour.
+  function timesheetRows(ym){
+    var range = monthRange(ym+"-01");
+    var map = {};
+    activeClasses().forEach(function(c){
+      if (c.org !== "primeplus" || c.date < range[0] || c.date > range[1]) return;
+      var hours = Number(c.durationHours) || 0;
+      var bits = [];
+      if (c.classLabel) bits.push(c.classLabel);
+      if (c.category) bits.push(PRIMEPLUS_LABELS[c.category] || c.category);
+      if (hours) bits.push(fmtLessonLength(hours));
+      var rate = Number(c.rate) || 0;
+      var key = bits.join(" · ")+"|"+rate;
+      var row = map[key] || (map[key] = { name:bits.join(" · ") || "PrimePlus class", lessons:0, rate:rate, perLesson:Number(c.income) || 0, income:0 });
+      row.lessons++;
+      row.income += Number(c.income) || 0;
+    });
+    return Object.keys(map).map(function(k){ return map[k]; })
+      .sort(function(a,b){ return a.name < b.name ? -1 : a.name > b.name ? 1 : a.rate - b.rate; });
+  }
+  function xmlEscape(s){
+    return String(s).replace(/[&<>"]/g, function(ch){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[ch]; });
+  }
+  // Replaces a cell in the sheet XML, keeping its style. value: string, number or null (empty).
+  function setSheetCell(xml, ref, value){
+    var re = new RegExp('<c r="'+ref+'"( s="\\d+")?(?: t="\\w+")?\\s*(?:/>|>[\\s\\S]*?</c>)');
+    return xml.replace(re, function(_, style){
+      style = style || "";
+      if (value === null || value === "") return '<c r="'+ref+'"'+style+'/>';
+      if (typeof value === "number") return '<c r="'+ref+'"'+style+'><v>'+value+'</v></c>';
+      return '<c r="'+ref+'"'+style+' t="inlineStr"><is><t>'+xmlEscape(value)+'</t></is></c>';
+    });
+  }
+  async function buildTimesheet(ym){
+    var rows = timesheetRows(ym);
+    var maxRows = TIMESHEET_LAST_ROW - TIMESHEET_FIRST_ROW + 1;
+    if (rows.length > maxRows) throw new Error("The timesheet only has room for "+maxRows+" kinds of class.");
+    await loadJsZip();
+    var resp = await fetch("/primeplus-timesheet.xlsx");
+    if (!resp.ok) throw new Error("template "+resp.status);
+    var zip = await JSZip.loadAsync(await resp.arrayBuffer());
+    var path = "xl/worksheets/sheet1.xml";
+    var xml = await zip.file(path).async("string");
+    xml = setSheetCell(xml, "C6", "📋 INVOICE - "+monthLabelLong(ym));
+    // Widen the Rate column so "40.00 (50.00 per lesson)" fits.
+    xml = xml.replace('<col min="4" max="5" width="18" customWidth="1"/>',
+      '<col min="4" max="4" width="18" customWidth="1"/><col min="5" max="5" width="26" customWidth="1"/>');
+    for (var i = 0; i < maxRows; i++){
+      var r = TIMESHEET_FIRST_ROW + i, row = rows[i];
+      xml = setSheetCell(xml, "C"+r, row ? row.name : null);
+      xml = setSheetCell(xml, "D"+r, row ? row.lessons : null);
+      xml = setSheetCell(xml, "E"+r, row ? row.rate.toFixed(2)+" ("+row.perLesson.toFixed(2)+" per lesson)" : null);
+    }
+    // The first row's style uses a Chinese font (for the placeholder); give it the same look as the rows below.
+    xml = xml.replace('<c r="C'+TIMESHEET_FIRST_ROW+'" s="6"', '<c r="C'+TIMESHEET_FIRST_ROW+'" s="9"');
+    var total = rows.reduce(function(s,row){ return s + row.income; }, 0);
+    xml = setSheetCell(xml, "C"+TIMESHEET_TOTAL_ROW, "Total: SGD "+total.toFixed(2));
+    zip.file(path, xml);
+    return zip.generateAsync({ type:"blob", compression:"DEFLATE",
+      mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  }
+  function renderTimesheetSection(){
+    var rows = timesheetRows(timesheetMonth);
+    var lessons = rows.reduce(function(s,r){ return s + r.lessons; }, 0);
+    var total = rows.reduce(function(s,r){ return s + r.income; }, 0);
+    var upcoming = activeClasses().filter(function(c){
+      return c.org === "primeplus" && c.date.slice(0,7) === timesheetMonth && c.date > todayStr();
+    }).length;
+    var table = rows.length ?
+      '<div class="ts-rows">'+rows.map(function(r){
+        return '<div class="ts-row"><span>'+escapeHtml(r.name)+'</span><span>'+r.lessons+' × '+fmtMoney(r.rate)+'/h ('+fmtMoney(r.perLesson)+')</span></div>';
+      }).join("")+
+      '<div class="ts-row ts-total"><span>'+lessons+' lesson'+(lessons===1?"":"s")+'</span><span>'+fmtMoney(total)+'</span></div></div>' :
+      '<div class="export-summary">No PrimePlus classes in '+monthLabelShort(timesheetMonth)+'.</div>';
+    return '<div class="card" id="timesheetCard"><h2>PrimePlus timesheet</h2>'+
+      '<div class="ih-hint" style="margin:-4px 0 12px;">Fills in PrimePlus\'s invoice spreadsheet with the month\'s classes.</div>'+
+      '<div class="cal-nav copy-nav ts-nav">'+
+        '<button class="icon-btn" id="tsPrev" aria-label="Previous month">‹</button>'+
+        '<div class="cal-month">'+monthLabelLong(timesheetMonth)+'</div>'+
+        '<button class="icon-btn" id="tsNext" aria-label="Next month">›</button>'+
+      '</div>'+
+      table+
+      (upcoming ? '<div class="ih-hint" style="margin:-4px 0 12px;">Includes '+upcoming+' class'+(upcoming===1?"":"es")+' still to come this month.</div>' : '')+
+      '<div class="export-btns"><button class="export-btn" id="tsDownload"'+(rows.length ? "" : " disabled")+'>Timesheet<small>Excel file to send PrimePlus</small></button></div>'+
+    '</div>';
+  }
+  function bindTimesheetSection(){
+    loadJsZip().catch(function(){});
+    function rerender(){
+      document.getElementById("timesheetCard").outerHTML = renderTimesheetSection();
+      bindTimesheetSection();
+    }
+    document.getElementById("tsPrev").addEventListener("click", function(){
+      timesheetMonth = addDays(timesheetMonth+"-01", -1).slice(0,7); rerender();
+    });
+    document.getElementById("tsNext").addEventListener("click", function(){
+      timesheetMonth = addDays(monthRange(timesheetMonth+"-01")[1], 1).slice(0,7); rerender();
+    });
+    document.getElementById("tsDownload").addEventListener("click", async function(){
+      var btn = this;
+      btn.disabled = true;
+      try{
+        await saveExport(await buildTimesheet(timesheetMonth), "PrimePlus-timesheet-"+timesheetMonth+".xlsx");
+      }catch(e){
+        console.error("timesheet", e);
+        showToast(/room for/.test(e.message) ? e.message : "Couldn't make the timesheet. Check your connection.");
+      }
+      btn.disabled = false;
+    });
+  }
+
   function renderAccountSection(){
     var user = firebase.auth().currentUser;
     return '<div class="card"><h2>Account</h2>'+
@@ -2031,6 +2172,7 @@
         '<div class="ih-hint" style="margin-top:8px;">Shown as a dashed line on your monthly income chart. Leave empty to turn it off.</div>'+
       '</div>'+
       renderExportSection()+
+      renderTimesheetSection()+
       renderLeaveSection()+
       '<div class="card"><h2>Organisation colours</h2>'+
         rows+
@@ -2049,6 +2191,7 @@
     document.getElementById("resetColorsBtn").addEventListener("click", resetOrgColors);
     bindLeaveSection();
     bindExportSection();
+    bindTimesheetSection();
     document.getElementById("signOutBtn").addEventListener("click", function(){
       if (!window.confirm("Sign out of Teaching Ledger on this device?")) return;
       firebase.auth().signOut();

@@ -27,6 +27,7 @@ Live at: https://shraddha-income-tracker.web.app
 - **Settings**
   - Monthly goal.
   - Export classes and income as CSV or a PDF statement, for this or last month, this or last year, or all time.
+  - PrimePlus timesheet: fills PrimePlus's invoice spreadsheet for a chosen month (lessons per class type, hourly rate with the pay per lesson, total).
   - Overseas trips:
     - Working: classes count as usual.
     - Not working: classes are dropped from income. Relief is tracked per class.
@@ -35,7 +36,8 @@ Live at: https://shraddha-income-tracker.web.app
 ## Structure
 
 - `public/index.html`: the whole app. Single file, no build step.
-  - It loads `jsPDF` from cdnjs only when exporting a PDF.
+  - It loads `jsPDF` from cdnjs only when exporting a PDF, and `JSZip` only for the PrimePlus timesheet.
+- `public/primeplus-timesheet.xlsx`: PrimePlus's blank invoice template that the timesheet fills in.
 - `public/manifest.json`, `public/sw.js` and the icons make it installable.
   - The service worker caches nothing, so new deploys show up straight away.
 - `firestore.rules`: only the owner's Firebase account (matched by UID) can read or write.
