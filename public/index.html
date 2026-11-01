@@ -679,6 +679,34 @@
   .detail-row .k{ color:var(--ink-soft); font-weight:600; }
   .detail-row .v{ font-weight:700; text-align:right; }
   .modal-actions{ margin-top:14px; display:flex; gap:8px; }
+  .copy-open-btn{
+    width:100%; margin-top:14px; padding:10px; border-radius:12px; cursor:pointer;
+    background:var(--accent-ink); color:var(--accent-strong); border:1px solid var(--line);
+    font-size:12.5px; font-weight:700; font-family:inherit;
+  }
+  .copy-summary{ font-size:12.5px; font-weight:700; }
+  .copy-quick{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px; }
+  .copy-nav{ margin:6px 0 8px; }
+  .copy-nav .cal-month{ font-size:14px; font-weight:700; }
+  .copy-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
+  .copy-wd{ text-align:center; font-size:10px; color:var(--ink-soft); font-weight:700; text-transform:uppercase; padding-bottom:2px; }
+  .copy-day{
+    position:relative; aspect-ratio:1; border-radius:10px; border:1px solid var(--line);
+    background:var(--surface-2); color:var(--ink); font-size:12.5px; font-weight:700; font-family:inherit; cursor:pointer;
+  }
+  .copy-day.empty{ border:none; background:none; cursor:default; }
+  .copy-day.is-today{ border-color:var(--accent); }
+  .copy-day.on-leave{ background:repeating-linear-gradient(135deg, var(--surface-2) 0 5px, var(--accent-ink) 5px 10px); }
+  .copy-day.is-original{ background:none; border:1.5px dashed var(--accent); color:var(--ink-soft); cursor:default; }
+  .copy-day.is-picked{ background:var(--grad); color:var(--on-gradient); border-color:transparent; }
+  .copy-busy{ position:absolute; bottom:4px; left:50%; width:4px; height:4px; margin-left:-2px; border-radius:50%; background:var(--accent); }
+  .copy-day.is-picked .copy-busy{ background:var(--on-gradient); }
+  .copy-legend{ display:flex; align-items:center; gap:6px; font-size:11px; color:var(--ink-soft); margin-top:8px; }
+  .copy-key{ display:inline-block; width:10px; height:10px; border-radius:3px; }
+  .copy-key.orig{ border:1.5px dashed var(--accent); }
+  .copy-key.busy{ width:5px; height:5px; border-radius:50%; background:var(--accent); margin-left:8px; }
+  .modal-actions .copy-go{ flex:2; background:var(--grad); color:var(--on-gradient); border-color:transparent; }
+  .modal-actions .copy-go:disabled{ opacity:0.5; cursor:default; }
   .modal-actions .icon-btn{
     flex:1; border:1px solid var(--line); border-radius:12px; padding:9px; font-size:12.5px; font-weight:700;
   }
@@ -1092,6 +1120,9 @@
   var toastTimer = null;
   var detailClassId = null;    // which class's detail modal is open
   var detailEditMode = false;  // is the detail modal showing the edit form
+  var detailCopyMode = false;  // is the detail modal showing the copy-to-dates picker
+  var copyDates = {};          // "YYYY-MM-DD" -> true for the dates picked to copy the class to
+  var copyMonth = null;        // "YYYY-MM" the copy picker is showing
   var syncRuns = [];           // recent sync script runs, newest first
   var syncRunsLoaded = false;
   var customOrgs = [];         // user-added tuition centres, oldest first
@@ -3324,8 +3355,8 @@
     if (c.source) rows.push(["Source", SOURCE_LABELS[c.source] || c.source]);
     return rows;
   }
-  function openDetail(classId){ detailClassId = classId; detailEditMode = false; renderDetailModal(); }
-  function closeDetail(){ detailClassId = null; detailEditMode = false; renderDetailModal(); }
+  function openDetail(classId){ detailClassId = classId; detailEditMode = false; detailCopyMode = false; renderDetailModal(); }
+  function closeDetail(){ detailClassId = null; detailEditMode = false; detailCopyMode = false; renderDetailModal(); }
   function attrEscape(s){ return String(s||"").replace(/"/g,"&quot;"); }
 
   function editFormHtml(c, meta){
@@ -3460,6 +3491,157 @@
     });
   }
 
+  // ---- Copy a class to other dates ----
+  // The copy keeps everything about the class except the date; pay is worked out again for
+  // each date, since Mind Stretcher pays more on weekends.
+  function copyOfClass(c, date){
+    var fields = {
+      date: date,
+      startTime: c.startTime || null,
+      durationHours: c.durationHours,
+      level: c.level || null,
+      category: c.category || null,
+      studentCount: c.studentCount || null,
+      classLabel: c.classLabel || null,
+      description: c.description || null
+    };
+    if (c.rawLabel) fields.rawLabel = c.rawLabel;
+    var computed = computeIncome(c.org, fields);
+    return Object.assign({
+      org: c.org,
+      source: "manual",
+      seriesId: null,
+      copiedFrom: c.id,
+      deletedAt: null,
+      createdAt: Date.now(),
+      rate: computed.rate,
+      income: computed.income
+    }, fields);
+  }
+  function copySelectedList(){ return Object.keys(copyDates).filter(function(d){ return copyDates[d]; }).sort(); }
+
+  function copyPickerHtml(c, meta){
+    var p = copyMonth.split("-").map(Number);
+    var first = copyMonth+"-01";
+    var daysInMonth = new Date(p[0], p[1], 0).getDate();
+    var today = todayStr();
+    var busy = {};
+    activeClasses().forEach(function(x){ if (x.date.slice(0,7) === copyMonth) busy[x.date] = true; });
+
+    var cells = [];
+    for (var i = 0; i < weekdayIdx(first); i++) cells.push('<span class="copy-day empty"></span>');
+    for (var d = 1; d <= daysInMonth; d++){
+      var ds = copyMonth+"-"+pad(d);
+      var cls = "copy-day";
+      if (ds === c.date) cls += " is-original";
+      if (copyDates[ds]) cls += " is-picked";
+      if (ds === today) cls += " is-today";
+      if (leavesOn(ds).some(function(l){ return !l.working; })) cls += " on-leave";
+      cells.push('<button class="'+cls+'" data-copyday="'+ds+'"'+(ds === c.date ? ' disabled title="This class"' : '')+'>'+
+        d+(busy[ds] && ds !== c.date ? '<span class="copy-busy"></span>' : '')+
+      '</button>');
+    }
+    var picked = copySelectedList();
+    var total = picked.reduce(function(sum, ds){ return sum + copyOfClass(c, ds).income; }, 0);
+    var wd = new Date(c.date+"T00:00:00").toLocaleDateString("en-SG",{weekday:"short"});
+    var bits = [];
+    var typeLabel = classTypeLabel(c);
+    if (typeLabel) bits.push(escapeHtml(typeLabel));
+    if (c.startTime) bits.push(classTimeRange(c));
+    bits.push(fmtMoney(c.income));
+    var synced = c.org === "mindstretcher" || c.org === "ottodot";
+
+    return '<div class="modal-card">'+
+      '<div class="modal-head"><span class="dot" style="background:'+meta.color+'"></span><h3>Copy class</h3>'+
+        '<button class="icon-btn" id="copyCloseBtn" aria-label="Close">✕</button>'+
+      '</div>'+
+      '<div class="copy-summary">'+meta.label+' · '+bits.join(' · ')+'</div>'+
+      '<div class="ih-hint" style="margin:6px 0 12px;">Tap the dates to copy it to.'+
+        (synced ? ' '+meta.label+' classes normally come in through sync, so only copy ones it won\'t bring in.' : '')+
+      '</div>'+
+      '<div class="copy-quick">'+
+        '<button class="chip" id="copyWeekly">Every '+wd+' for 4 weeks</button>'+
+        (picked.length ? '<button class="chip" id="copyClear">Clear</button>' : '')+
+      '</div>'+
+      '<div class="cal-nav copy-nav">'+
+        '<button class="icon-btn" id="copyPrev" aria-label="Previous month">‹</button>'+
+        '<div class="cal-month">'+monthLabelShort(copyMonth)+'</div>'+
+        '<button class="icon-btn" id="copyNext" aria-label="Next month">›</button>'+
+      '</div>'+
+      '<div class="copy-grid">'+
+        WEEKDAY_LABELS.map(function(l){ return '<span class="copy-wd">'+l+'</span>'; }).join("")+
+        cells.join("")+
+      '</div>'+
+      '<div class="copy-legend"><span class="copy-key orig"></span>this class <span class="copy-key busy"></span>has classes</div>'+
+      '<div class="modal-actions">'+
+        '<button class="icon-btn" id="copyBackBtn">Back</button>'+
+        '<button class="icon-btn copy-go" id="copySaveBtn"'+(picked.length ? '' : ' disabled')+'>'+
+          (picked.length ? 'Copy to '+picked.length+' date'+(picked.length===1?'':'s')+' · '+fmtMoney(total) : 'Pick dates')+
+        '</button>'+
+      '</div>'+
+    '</div>';
+  }
+
+  function wireCopyPicker(c){
+    function rerender(){ renderDetailModal(); }
+    document.getElementById("copyCloseBtn").addEventListener("click", closeDetail);
+    document.getElementById("copyBackBtn").addEventListener("click", function(){ detailCopyMode = false; rerender(); });
+    document.querySelectorAll("[data-copyday]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var ds = btn.getAttribute("data-copyday");
+        copyDates[ds] = !copyDates[ds];
+        rerender();
+      });
+    });
+    function shiftMonth(n){
+      var p = copyMonth.split("-").map(Number);
+      var d = new Date(p[0], p[1]-1+n, 1);
+      copyMonth = d.getFullYear()+"-"+pad(d.getMonth()+1);
+      rerender();
+    }
+    document.getElementById("copyPrev").addEventListener("click", function(){ shiftMonth(-1); });
+    document.getElementById("copyNext").addEventListener("click", function(){ shiftMonth(1); });
+    document.getElementById("copyWeekly").addEventListener("click", function(){
+      for (var w = 1; w <= 4; w++) copyDates[addDays(c.date, 7*w)] = true;
+      rerender();
+    });
+    var clearBtn = document.getElementById("copyClear");
+    if (clearBtn) clearBtn.addEventListener("click", function(){ copyDates = {}; rerender(); });
+
+    document.getElementById("copySaveBtn").addEventListener("click", async function(){
+      var picked = copySelectedList();
+      if (!picked.length || !db) return;
+      var docs = picked.map(function(ds){ return copyOfClass(c, ds); });
+      var warnings = [];
+      docs.forEach(function(doc){
+        var clashing = clashesWith(doc, null);
+        if (clashing.length) warnings.push(fmtDate(doc.date)+": overlaps "+clashing.map(function(x){
+          return orgMeta(x.org).label+" ("+classTimeRange(x)+")";
+        }).join(", "));
+      });
+      var onTrip = docs.filter(function(doc){ return leaveForClass(doc); });
+      if (onTrip.length) warnings.push(onTrip.length+" of these date"+(onTrip.length===1?" is":"s are")+" during a trip you're not working, so "+(onTrip.length===1?"it":"they")+" won't count towards income.");
+      if (warnings.length && !window.confirm(warnings.join("\n")+"\n\nCopy anyway?")) return;
+
+      this.disabled = true;
+      this.textContent = "Copying…";
+      try{
+        var batch = db.batch();
+        docs.forEach(function(doc){ batch.set(db.collection("classes").doc(), doc); });
+        await batch.commit();
+        showToast("Copied to "+picked.length+" date"+(picked.length===1?"":"s"), false);
+        copyDates = {};
+        detailCopyMode = false;
+        closeDetail();
+      }catch(e){
+        console.error("copy class", e);
+        this.disabled = false;
+        this.textContent = "Try again";
+        showToast("Couldn't copy. Check your connection.", false);
+      }
+    });
+  }
+
   function renderDetailModal(){
     var existing = document.getElementById("detailOverlay");
     if (existing) existing.remove();
@@ -3470,6 +3652,14 @@
     var overlay = document.createElement("div");
     overlay.id = "detailOverlay";
     overlay.className = "modal-overlay";
+
+    if (detailCopyMode){
+      overlay.innerHTML = copyPickerHtml(c, meta);
+      document.body.appendChild(overlay);
+      overlay.addEventListener("click", function(e){ if (e.target === overlay) closeDetail(); });
+      wireCopyPicker(c);
+      return;
+    }
 
     if (detailEditMode){
       overlay.innerHTML = editFormHtml(c, meta);
@@ -3488,12 +3678,19 @@
           '<button class="icon-btn" id="detailCloseBtn" aria-label="Close">✕</button>'+
         '</div>'+
         rowsHtml+
+        '<button class="copy-open-btn" id="detailCopyBtn">⧉ Copy to other dates</button>'+
         '<div class="modal-actions"><button class="icon-btn" id="detailEditBtn">Edit</button><button class="icon-btn danger" id="detailDeleteBtn">Delete class</button></div>'+
       '</div>';
     document.body.appendChild(overlay);
     overlay.addEventListener("click", function(e){ if (e.target === overlay) closeDetail(); });
     document.getElementById("detailCloseBtn").addEventListener("click", closeDetail);
     document.getElementById("detailEditBtn").addEventListener("click", function(){ detailEditMode = true; renderDetailModal(); });
+    document.getElementById("detailCopyBtn").addEventListener("click", function(){
+      detailCopyMode = true;
+      copyDates = {};
+      copyMonth = c.date.slice(0,7);
+      renderDetailModal();
+    });
     document.getElementById("detailDeleteBtn").addEventListener("click", function(){
       softDelete(c.id);
       closeDetail();

@@ -21,6 +21,7 @@ Live at: https://shraddha-income-tracker.web.app
 - **Add**: one-off or weekly classes. Pay is worked out from each centre's rates. You're warned before saving a class that overlaps another.
 - **History**
   - list, week and calendar views, filterable by centre
+  - tap a class to edit it, or copy it to other dates (pick days on a calendar or "every week for 4 weeks"; pay is worked out for each date)
   - sync log for the Tampermonkey scripts
 - **Trash**: deleted classes can be restored.
 - **Settings**
