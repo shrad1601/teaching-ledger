@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ottodot Airtable -> Teaching Ledger Sync
 // @namespace    shraddha-teaching-ledger
-// @version      1.3
+// @version      1.4
 // @description  Reads your Ottodot Airtable schedule and writes classes straight into your Teaching Ledger (Firestore). No copy-paste.
 // @match        https://airtable.com/apptZFP6ejwcRA6Il/*
 // @grant        GM_getValue
@@ -390,7 +390,9 @@
             source: "synced-ottodot",
             seriesId: null,
             deletedAt: null,
-            createdAt: Date.now()
+            createdAt: Date.now(),
+            // Only my own name can be in the relief column by this point: I'm covering someone's class.
+            relief: !!reliefName
           });
           written++;
         }

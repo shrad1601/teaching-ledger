@@ -32,10 +32,10 @@ Live at: https://shraddha-income-tracker.web.app
   - Overseas trips:
     - Working: classes count as usual.
     - Not working: classes are dropped from income. Relief is tracked per class.
-  - Centre colours and custom centres.
+  - Centre colours and custom centres (name, hourly rate, colour, a short name for Google Calendar, and whether its classes are usually online, physical or vary).
 - **Google Calendar**: every class is mirrored into a shared Google Calendar within seconds (see `functions/`).
   - Titles are short: `MS P5 Science Katong`, `Otto P4 Sci`. The place only shows when it isn't the centre's usual.
-  - Regular classes are Peacock (blue), relief classes Lavender (purple). Mind Stretcher uses Dash's RELIEF tag.
+  - Regular classes are Peacock (blue), relief classes Lavender (purple). Mind Stretcher uses Dash's RELIEF tag and Ottodot its relief-teacher column; otherwise a class counts as regular if it repeats weekly.
   - Classes on not-working trips are left off. Events added by hand in the calendar are never touched.
 
 ## Structure
@@ -47,7 +47,7 @@ Live at: https://shraddha-income-tracker.web.app
   - The service worker caches nothing, so new deploys show up straight away.
 - `firestore.rules`: only the owner's Firebase account (matched by UID) can read or write.
 - `mindstretcher-sync.user.js`: Tampermonkey script that runs on Dash (`dash.mindstretcher.com`). It reads the schedule (including each class's venue and RELIEF tag) and attendance, then writes classes straight into Firestore.
-- `ottodot-sync.user.js`: Tampermonkey script that does the same from Ottodot's Airtable schedule.
+- `ottodot-sync.user.js`: Tampermonkey script that does the same from Ottodot's Airtable schedule. Classes where you're the relief teacher are saved with `relief: true`.
 - `functions/`: Cloud Functions (2nd gen, `asia-southeast1`) that keep the Google Calendar in step with `classes`.
   - `calendarSyncClass`: on any class write, updates that class's event (and the same slot a week either side, for the blue/purple colour).
   - `calendarSyncLeaves` / `calendarSyncOrgs`: recheck the whole calendar when a trip or custom centre changes.
@@ -70,7 +70,7 @@ Live at: https://shraddha-income-tracker.web.app
 
 | Collection / doc   | What it holds                                                    |
 | ------------------ | ---------------------------------------------------------------- |
-| `classes`          | One doc per class: org, date, time, hours, rate, income, `mode` (online/physical), `place`, `relief` (MS). Soft-deleted with `deletedAt`. |
+| `classes`          | One doc per class: org, date, time, hours, rate, income, `mode` (online/physical), `place`, `relief` (MS, Ottodot). Soft-deleted with `deletedAt`. |
 | `series`           | Weekly repeating classes, expanded into `classes` up to a year ahead. |
 | `orgs`             | Custom centres (name, hourly rate, colour, optional `short` name for the calendar and default `mode`). |
 | `payments`         | `{org}_{YYYY-MM}`: whether that centre's month has been paid.     |

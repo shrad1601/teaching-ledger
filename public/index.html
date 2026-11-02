@@ -1442,17 +1442,43 @@
     }
   }
 
-  async function addCustomOrg(label, rate, color){
+  // extras: {short, mode}. short is the centre's name in Google Calendar titles (e.g. "CM");
+  // mode is where its classes usually are ("online" | "physical" | null when it varies).
+  async function addCustomOrg(label, rate, color, extras){
     if (!db) return null;
-    var doc = { label: label, rate: rate, color: color, createdAt: Date.now() };
+    var doc = Object.assign({ label: label, rate: rate, color: color, createdAt: Date.now() }, extras);
     var ref = await db.collection("orgs").add(doc);
     // Render instantly rather than waiting on the snapshot round-trip.
     if (!findCustomOrg(ref.id)) customOrgs.push(Object.assign({id:ref.id}, doc));
     return ref.id;
   }
-  async function updateCustomOrg(id, label, rate, color){
+  async function updateCustomOrg(id, label, rate, color, extras){
     if (!db) return;
-    await db.collection("orgs").doc(id).update({ label: label, rate: rate, color: color });
+    await db.collection("orgs").doc(id).update(Object.assign({ label: label, rate: rate, color: color }, extras));
+  }
+  function orgExtrasFieldsHtml(prefix, o, fieldStyle){
+    var mode = o && o.mode || "";
+    var opt = function(val, text){ return '<button data-val="'+val+'" class="'+(mode===val?"active":"")+'">'+text+'</button>'; };
+    return '<div class="field"'+(fieldStyle||"")+'><label>Short name (optional)</label>'+
+        '<input type="text" id="'+prefix+'Short" maxlength="12" placeholder="e.g. CM — used in Google Calendar" value="'+attrEscape(o && o.short || "")+'"></div>'+
+      '<div class="field"'+(fieldStyle||"")+'><label>Classes are usually</label><div class="choice-row" id="'+prefix+'Mode">'+
+        opt("online","Online")+opt("physical","Physical")+opt("","Varies")+
+      '</div></div>';
+  }
+  function wireOrgExtras(prefix){
+    document.querySelectorAll("#"+prefix+"Mode button").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        document.querySelectorAll("#"+prefix+"Mode button").forEach(function(b){ b.classList.remove("active"); });
+        btn.classList.add("active");
+      });
+    });
+  }
+  function readOrgExtras(prefix){
+    var active = document.querySelector("#"+prefix+"Mode button.active");
+    return {
+      short: document.getElementById(prefix+"Short").value.trim() || null,
+      mode: active && active.getAttribute("data-val") || null
+    };
   }
   async function deleteCustomOrg(id){
     if (!db) return;
@@ -1491,6 +1517,7 @@
       '<div class="field" style="margin-bottom:0;"><label>Name</label><input type="text" id="editOrgLabel_'+o.id+'" value="'+attrEscape(o.label)+'"></div>'+
       '<div class="field" style="margin-bottom:0;"><label>Hourly rate ($)</label><input type="number" id="editOrgRate_'+o.id+'" min="0" step="0.5" value="'+o.rate+'"></div>'+
       '<div class="field" style="margin-bottom:0;"><label>Colour</label><input type="color" class="color-input" id="editOrgColor_'+o.id+'" value="'+o.color+'"></div>'+
+      orgExtrasFieldsHtml("editOrg_"+o.id, o, ' style="margin-bottom:0;"')+
       '<div style="display:flex;gap:8px;">'+
         '<button class="icon-btn" data-cancel-org-edit="'+o.id+'" style="flex:1;border:1px solid var(--line);border-radius:12px;padding:9px;">Cancel</button>'+
         '<button class="icon-btn" data-save-org-edit="'+o.id+'" style="flex:1;border:1px solid var(--line);border-radius:12px;padding:9px;">Save</button>'+
@@ -1502,8 +1529,10 @@
       if (editingOrgId === o.id) return renderCustomOrgEditRow(o);
       var count = orgClassCount(o.id);
       return '<div class="settings-row">'+
-        '<div class="settings-label"><span class="dot swatch-dot" style="background:'+o.color+'"></span>'+o.label+
-          ' <span class="mono" style="color:var(--ink-soft);font-size:11px;">'+fmtMoney(o.rate)+'/h</span></div>'+
+        '<div class="settings-label"><span class="dot swatch-dot" style="background:'+o.color+'"></span>'+escapeHtml(o.label)+
+          (o.short ? ' <span style="color:var(--ink-soft);font-size:11px;">('+escapeHtml(o.short)+')</span>' : '')+
+          ' <span class="mono" style="color:var(--ink-soft);font-size:11px;">'+fmtMoney(o.rate)+'/h'+
+          (o.mode ? ' · '+(o.mode==="online" ? "Online" : "Physical") : '')+'</span></div>'+
         '<div style="display:flex;align-items:center;gap:10px;">'+
           '<button class="icon-btn" data-edit-org="'+o.id+'">Edit</button>'+
           (count
@@ -2257,6 +2286,7 @@
     mainEl.querySelectorAll("[data-delete-org]").forEach(function(btn){
       btn.addEventListener("click", function(){ deleteCustomOrg(btn.getAttribute("data-delete-org")); });
     });
+    if (editingOrgId) wireOrgExtras("editOrg_"+editingOrgId);
     mainEl.querySelectorAll("[data-save-org-edit]").forEach(function(btn){
       btn.addEventListener("click", async function(){
         var id = btn.getAttribute("data-save-org-edit");
@@ -2266,7 +2296,7 @@
         if (!label || !(rate > 0)){ showToast("Enter a name and a rate above $0", false); return; }
         btn.disabled = true;
         try{
-          await updateCustomOrg(id, label, rate, color);
+          await updateCustomOrg(id, label, rate, color, readOrgExtras("editOrg_"+id));
           editingOrgId = null;
           renderSettings();
           showToast("Centre updated", false);
@@ -3176,9 +3206,11 @@
         '<div class="field"><label>Name</label><input type="text" id="newOrgLabel" placeholder="e.g. Learning Loft" autofocus></div>'+
         '<div class="field"><label>Hourly rate ($)</label><input type="number" id="newOrgRate" min="0" step="0.5" value="40"></div>'+
         '<div class="field"><label>Colour</label><input type="color" class="color-input" id="newOrgColor" value="'+defaultColor+'"></div>'+
+        orgExtrasFieldsHtml("newOrg", null)+
         '<button class="save-btn" id="newOrgSaveBtn">Add centre</button>'+
       '</div>';
     document.getElementById("backBtn").addEventListener("click", function(){ addOrg=null; renderAdd(); });
+    wireOrgExtras("newOrg");
     document.getElementById("newOrgSaveBtn").addEventListener("click", async function(){
       var label = document.getElementById("newOrgLabel").value.trim();
       var rate = Number(document.getElementById("newOrgRate").value);
@@ -3188,7 +3220,7 @@
       this.disabled = true;
       this.textContent = "Adding…";
       try{
-        var newId = await addCustomOrg(label, rate, color);
+        var newId = await addCustomOrg(label, rate, color, readOrgExtras("newOrg"));
         showToast("Centre added", false);
         addOrg = newId;
         renderAdd();
