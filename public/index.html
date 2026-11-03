@@ -651,7 +651,12 @@
   }
   .link-btn{ border:none; background:none; padding:0; color:var(--accent); font:inherit; font-weight:700; cursor:pointer; }
   .cal-daypanel{ margin-top:16px; }
-  .cal-daypanel h3{ font-size:15px; margin:0 0 10px; }
+  .cal-daypanel h3{ font-size:15px; margin:0; }
+  .cal-dayhead{ display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:10px; }
+  .cal-dayhead .link-btn{ font-size:12.5px; white-space:nowrap; }
+  .wk-right{ display:flex; align-items:center; gap:8px; }
+  .wk-add{ width:24px; height:24px; border-radius:999px; border:1px solid var(--line); background:var(--surface-2); color:var(--accent); font-size:15px; font-weight:700; line-height:1; cursor:pointer; padding:0; }
+  .add-on-date{ font-size:12.5px; color:var(--accent); font-weight:700; margin-left:6px; }
 
   /* ---- bottom nav ---- */
   nav.tabbar{
@@ -1167,6 +1172,7 @@
   var classesLoaded = false, seriesLoaded = false, materialized = false;
   var currentTab = "dashboard";
   var addOrg = null;           // which org's add-form is showing
+  var addDate = null;          // day picked in the History calendar to add a class on (null = today)
   var breakdownPeriod = "month"; // today | week | month | year
   var breakdownYear = todayStr().slice(0,4); // which year the breakdown shows when period is "year"
   var monthlyGoal = 0;         // target combined income per month (0 = not set)
@@ -1389,7 +1395,7 @@
       '<div class="field"><label>Number of scripts</label>'+
         '<input type="number" id="bScripts" min="1" step="1" placeholder="25" value="'+(b ? b.scripts : "")+'"></div>'+
       (b ? '<div class="field"><label>Marked so far</label><input type="number" id="bMarked" min="0" step="1" value="'+(Number(b.marked)||0)+'"></div>' : '')+
-      '<div class="field"><label>Due date</label><input type="date" id="bDue" value="'+(b ? b.due : addDays(todayStr(), 7))+'"></div>'+
+      '<div class="field"><label>Due date</label><input type="date" id="bDue" value="'+(b ? b.due : addDate || addDays(todayStr(), 7))+'"></div>'+
       '<div class="field"><label>Pay per script ($)</label>'+
         '<input type="number" id="bRate" min="0" step="0.05" placeholder="0.00" value="'+(rate || "")+'"></div>'+
       '<div class="ih-hint" id="bTotal" style="margin:-4px 0 14px;"></div>';
@@ -1435,8 +1441,7 @@
       try{ await addBatch(f); }
       catch(e){ console.error("addBatch", e); showToast("Couldn't save. Check your connection."); return; }
       showToast("Batch added · due "+shortDay(f.due));
-      addOrg = null;
-      setTab("dashboard");
+      finishAdd();
     });
   }
 
@@ -3380,7 +3385,8 @@
     sectionLabelEl.textContent = "Add a class";
     if (!addOrg){
       mainEl.innerHTML =
-        '<div class="card"><h2>Which organisation?</h2>'+
+        (addDate ? '<button class="back-link" id="addDateBack">← Back to calendar</button>' : '')+
+        '<div class="card"><h2>Which organisation?'+(addDate ? ' <span class="add-on-date">'+shortDay(addDate)+'</span>' : '')+'</h2>'+
           '<div class="quickgrid">'+
             quickBtn("mastermaths","Mastermaths")+
             quickBtn("bluetree","Bluetree")+
@@ -3396,6 +3402,8 @@
       mainEl.querySelectorAll("[data-quick]").forEach(function(btn){
         btn.addEventListener("click", function(){ addOrg = btn.getAttribute("data-quick"); renderAdd(); });
       });
+      var addDateBack = document.getElementById("addDateBack");
+      if (addDateBack) addDateBack.addEventListener("click", function(){ addDate = null; setTab("history"); });
       return;
     }
     if (addOrg === "__new__"){ renderNewOrgForm(); return; }
@@ -3431,7 +3439,7 @@
       '<button class="back-link" id="backBtn">← Choose a different organisation</button>'+
       '<div class="card">'+
         '<h2 style="color:'+orgMeta(org).color+'">'+orgMeta(org).label+'</h2>'+
-        '<div class="field"><label>Date</label><input type="date" id="fDate" value="'+today+'"></div>'+
+        '<div class="field"><label>Date</label><input type="date" id="fDate" value="'+(addDate || today)+'"></div>'+
         '<div class="field"><label>Start time</label><input type="time" id="fTime" value="16:00"></div>'+
         '<div class="field"><label>Duration (hours)</label><input type="number" id="fDuration" min="0.25" step="0.25" value="1"></div>'+
         '<div class="field"><label>Class / level (optional)</label><input type="text" id="fClassLabel" placeholder="e.g. P4 Math"></div>'+
@@ -3513,8 +3521,7 @@
         if (recurringOn) await saveRecurring(org, fields);
         else await saveOneOff(org, fields);
         showToast("Class saved", false);
-        addOrg = null;
-        setTab("dashboard");
+        finishAdd();
       }catch(e){
         console.error(e);
         this.disabled = false;
@@ -3618,12 +3625,20 @@
       });
     }
 
+    mainEl.querySelectorAll("[data-add-date]").forEach(function(btn){
+      btn.addEventListener("click", function(){ startAddOn(btn.getAttribute("data-add-date")); });
+    });
     if (historyView === "calendar"){
       var prevBtn = document.getElementById("calPrev"), nextBtn = document.getElementById("calNext");
       if (prevBtn) prevBtn.addEventListener("click", function(){ calendarMonth = shiftMonth(calendarMonth,-1); renderHistory(); });
       if (nextBtn) nextBtn.addEventListener("click", function(){ calendarMonth = shiftMonth(calendarMonth,1); renderHistory(); });
+      // Like a phone calendar: the first tap picks a day, a second tap on it starts a new class there.
       mainEl.querySelectorAll("[data-date]").forEach(function(btn){
-        btn.addEventListener("click", function(){ calendarSelected = btn.getAttribute("data-date"); renderHistory(); });
+        btn.addEventListener("click", function(){
+          var d = btn.getAttribute("data-date");
+          if (d === calendarSelected) startAddOn(d);
+          else { calendarSelected = d; renderHistory(); }
+        });
       });
       mainEl.querySelectorAll("[data-detailchip]").forEach(function(chip){
         chip.addEventListener("click", function(e){
@@ -3780,7 +3795,8 @@
       }).join("");
       daysHtml += '<div class="wk-day'+(d===today?" is-today":"")+(dayList.length?"":" is-free")+(dayLeaves.length?" on-leave":"")+'">'+
         '<div class="wk-head"><span class="wk-name">'+dayName+(d===today?' <span class="wk-today-tag">Today</span>':'')+leaveTag+'</span>'+
-          '<span class="wk-total mono">'+(dayList.length ? fmtMoney(dayTotal) : offTrip ? "Off" : "Free")+'</span></div>'+
+          '<span class="wk-right"><span class="wk-total mono">'+(dayList.length ? fmtMoney(dayTotal) : offTrip ? "Off" : "Free")+'</span>'+
+            '<button class="wk-add" data-add-date="'+d+'" aria-label="Add a class on '+shortDay(d)+'">+</button></span></div>'+
         rows+
       '</div>';
     }
@@ -3837,7 +3853,8 @@
       var dayClasses = activeClasses().filter(function(c){
         return c.date===calendarSelected && (historyOrgFilter==="all"||c.org===historyOrgFilter);
       });
-      panelHtml = '<div class="cal-daypanel"><h3 class="display">'+fmtDate(calendarSelected)+'</h3>' +
+      panelHtml = '<div class="cal-daypanel"><div class="cal-dayhead"><h3 class="display">'+fmtDate(calendarSelected)+'</h3>'+
+          '<button class="link-btn" data-add-date="'+calendarSelected+'">+ Add class</button></div>' +
         (dayClasses.length ? '<div class="class-list">'+dayClasses.map(renderClassItem).join("")+'</div>' : '<div class="empty-note">No classes this day.</div>') +
       '</div>';
     }
@@ -4282,6 +4299,19 @@
     });
   }
 
+  // Tapping a day in History opens Add with that date filled in, and saving goes back to History.
+  function startAddOn(dateStr){
+    addOrg = null;
+    addDate = dateStr;
+    setTab("add");
+  }
+  function finishAdd(){
+    var back = addDate ? "history" : "dashboard";
+    addOrg = null;
+    addDate = null;
+    setTab(back);
+  }
+
   function setTab(tab){
     closeDetail();
     currentTab = tab;
@@ -4293,6 +4323,7 @@
   document.querySelectorAll("nav.tabbar button").forEach(function(b){
     b.addEventListener("click", function(){
       if (b.getAttribute("data-tab") !== "add") addOrg = null;
+      addDate = null;
       setTab(b.getAttribute("data-tab"));
     });
   });

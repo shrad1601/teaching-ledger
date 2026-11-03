@@ -24,6 +24,7 @@ Live at: https://shraddha-income-tracker.web.app
   - BestMinds marking: a batch of scripts with a due date and pay per script. A batch counts as earned on the day its last script is marked, and as projected on its due date until then.
 - **History**
   - list, week and calendar views, filterable by centre
+  - add a class on a day: tap a date in the calendar, then tap it again (or "+ Add class"), or tap + on a day in the week view. The form opens with that date, and saving goes back to History.
   - tap a class to edit it, or copy it to other dates (pick days on a calendar or "every week for 4 weeks"; pay is worked out for each date)
   - sync log for the Tampermonkey scripts
 - **Trash**: deleted classes can be restored.
