@@ -1,5 +1,6 @@
 // Keeps the shared Google Calendar in step with the ledger.
 // - A class is written (added, edited, deleted, synced): its event is updated within seconds.
+// - A BestMinds marking batch is written: its due-date event is updated the same way.
 // - A trip or custom centre changes: the whole calendar is rechecked, since that can affect many classes.
 // - Once a night everything is rechecked anyway, to catch anything that slipped through.
 const { initializeApp } = require("firebase-admin/app");
@@ -9,7 +10,7 @@ const { onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineString } = require("firebase-functions/params");
 const logger = require("firebase-functions/logger");
-const { createClient, calendarApi, syncClass, reconcile } = require("./calendar");
+const { createClient, calendarApi, syncClass, syncBatch, reconcile } = require("./calendar");
 
 initializeApp();
 const db = getFirestore();
@@ -34,6 +35,11 @@ exports.calendarSyncClass = onDocumentWritten("classes/{classId}", async (event)
   const after = event.data.after.exists ? event.data.after.data() : null;
   const before = event.data.before.exists ? event.data.before.data() : null;
   await syncClass(db, calendar(), event.params.classId, after, before);
+});
+
+exports.calendarSyncMarking = onDocumentWritten("marking/{batchId}", async (event) => {
+  const after = event.data.after.exists ? event.data.after.data() : null;
+  await syncBatch(calendar(), event.params.batchId, after);
 });
 
 async function recheckAll() {

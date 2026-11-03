@@ -14,6 +14,8 @@ const ORG_DEFAULT_MODE = { ottodot: "online", primeplus: "online" };
 // Same colours as the TimeTree labels: Peacock (blue) for regular classes, Lavender (purple) for relief.
 const REGULAR_COLOR_ID = "7";
 const RELIEF_COLOR_ID = "1";
+// BestMinds marking deadlines are all-day events in Tangerine, so they stand apart from classes.
+const MARKING_COLOR_ID = "6";
 const OTTODOT_SUBJECT_LABELS = { SCI: "Sci", MATH: "Math", ENG: "Eng" };
 
 function parseOttodotLabel(raw) {
@@ -27,6 +29,10 @@ function parseOttodotLabel(raw) {
 // Calendar event ids may only use 0-9 and a-v, so the class id is hex-encoded.
 function eventIdFor(classId) {
   return "tl" + Buffer.from(classId, "utf8").toString("hex");
+}
+
+function markingEventIdFor(batchId) {
+  return "tm" + Buffer.from(batchId, "utf8").toString("hex");
 }
 
 function pad(n) { return String(n).padStart(2, "0"); }
@@ -95,6 +101,26 @@ function eventFor(c, leaves, orgs, slots) {
     event.end = { date: nextDay(c.date) };
   }
   return event;
+}
+
+// A marking batch's event: all day on its due date, ticked once it's finished.
+function markingEventFor(b) {
+  if (!b || b.deletedAt || !b.due) return null;
+  return {
+    summary: [b.doneDate ? "✓" : "", "BM marking", b.scripts + " scripts", b.label].filter(Boolean).join(" "),
+    location: "",
+    colorId: MARKING_COLOR_ID,
+    status: "confirmed",
+    extendedProperties: { private: { source: SOURCE } },
+    start: { date: b.due },
+    end: { date: nextDay(b.due) }
+  };
+}
+
+async function syncBatch(cal, batchId, data) {
+  const event = markingEventFor(data);
+  if (event) await cal.upsert(markingEventIdFor(batchId), event);
+  else await cal.remove(markingEventIdFor(batchId));
 }
 
 // Compares only the fields eventFor sets, against an event as Google returns it.
@@ -213,12 +239,18 @@ async function runPool(jobs, size) {
 
 // Brings the whole calendar in line with the ledger. Only events tagged as ours are ever changed.
 async function reconcile(db, cal, log = () => {}) {
-  const [classSnap, ctx, existing] = await Promise.all([db.collection("classes").get(), loadContext(db), cal.listOurs()]);
+  const [classSnap, markingSnap, ctx, existing] = await Promise.all([
+    db.collection("classes").get(), db.collection("marking").get(), loadContext(db), cal.listOurs()
+  ]);
   const want = new Map();
   const slots = slotsOf(classSnap.docs.map((d) => d.data()));
   classSnap.docs.forEach((d) => {
     const event = eventFor(d.data(), ctx.leaves, ctx.orgs, slots);
     if (event) want.set(eventIdFor(d.id), event);
+  });
+  markingSnap.docs.forEach((d) => {
+    const event = markingEventFor(d.data());
+    if (event) want.set(markingEventIdFor(d.id), event);
   });
   const have = new Map(existing.filter((e) => e.status !== "cancelled").map((e) => [e.id, e]));
   let added = 0, updated = 0, removed = 0;
@@ -239,4 +271,4 @@ async function reconcile(db, cal, log = () => {}) {
   return { wanted: want.size, added, updated, removed };
 }
 
-module.exports = { createClient, calendarApi, syncClass, reconcile, eventFor, eventIdFor, LEDGER_START };
+module.exports = { createClient, calendarApi, syncClass, syncBatch, reconcile, eventFor, eventIdFor, markingEventFor, LEDGER_START };

@@ -39,6 +39,7 @@
     --org-mastermaths:#3F9E8F;
     --org-bluetree:#3F8FB0;
     --org-primeplus:#B08A3A;
+    --org-bestminds:#B0577F;
     --shadow:0 1px 2px rgba(16,37,43,0.07), 0 14px 34px rgba(11,63,82,0.13);
     color-scheme: light;
   }
@@ -262,6 +263,20 @@
   .dash .bd-card{ order:4; }
   .dash .trend-card{ order:5; }
   .dash .comingup-card{ order:6; }
+  .dash .marking-card{ order:2; }
+  .mk-row{ padding:9px 0; border-top:1px solid var(--line); cursor:pointer; }
+  .mk-row:first-of-type{ border-top:none; padding-top:0; }
+  .mk-top{ display:flex; justify-content:space-between; align-items:baseline; gap:8px; font-size:13px; }
+  .mk-name{ font-weight:700; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .mk-due{ flex:0 0 auto; font-size:11.5px; color:var(--ink-soft); }
+  .mk-due.soon{ color:var(--rose); font-weight:700; }
+  .mk-due.late{ color:var(--danger); font-weight:700; }
+  .mk-bottom{ display:flex; align-items:center; gap:8px; margin-top:6px; }
+  .mk-bar{ flex:1; height:6px; border-radius:999px; background:var(--surface-2); overflow:hidden; }
+  .mk-bar i{ display:block; height:100%; background:var(--org-bestminds); border-radius:999px; }
+  .mk-count{ font-size:11.5px; color:var(--ink-soft); }
+  .mk-rates{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  .mk-rate{ display:flex; flex-direction:column; gap:4px; font-size:11.5px; color:var(--ink-soft); font-weight:600; }
   .quick-card .quickgrid{ grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:8px; }
   .quick-card .quickbtn{ flex-direction:row; justify-content:flex-start; gap:9px; padding:10px; text-align:left; }
   .quick-card .quickbtn .swatch{ flex:0 0 auto; width:16px; height:16px; border-radius:5px; }
@@ -972,9 +987,13 @@
     ottodot:       {label:"Ottodot",        color:"var(--org-ottodot)"},
     mastermaths:   {label:"Mastermaths",    color:"var(--org-mastermaths)"},
     bluetree:      {label:"Bluetree",       color:"var(--org-bluetree)"},
-    primeplus:     {label:"PrimePlus",      color:"var(--org-primeplus)"}
+    primeplus:     {label:"PrimePlus",      color:"var(--org-primeplus)"},
+    bestminds:     {label:"BestMinds",      color:"var(--org-bestminds)"}
   };
   var ORG_ORDER = ["mindstretcher","ottodot","mastermaths","bluetree","primeplus"];
+  // BestMinds is script marking, not classes: it has income but never shows up where classes are listed.
+  var MARKING_ORG = "bestminds";
+  var COLOR_ORGS = ORG_ORDER.concat([MARKING_ORG]);
 
   // ---------------- user-added tuition centres ----------------
   // Flat-hourly-rate organisations added at runtime, stored in the "orgs" collection.
@@ -991,6 +1010,7 @@
   function allOrgKeys(){
     return ORG_ORDER.concat(customOrgs.map(function(o){ return o.id; }));
   }
+  function incomeOrgKeys(){ return allOrgKeys().concat([MARKING_ORG]); }
   var NEW_ORG_PALETTE = ["#7C8FD6","#C97A46","#3F9E8F","#3F8FB0","#B08A3A","#B679DE","#5A9E6F","#C45C6A"];
   function nextOrgColor(){
     return NEW_ORG_PALETTE[customOrgs.length % NEW_ORG_PALETTE.length];
@@ -998,11 +1018,11 @@
 
   // ---------------- org colors (customizable) ----------------
   var DEFAULT_ORG_COLORS = {
-    mindstretcher:"#5A6FC4", ottodot:"#C97A46", mastermaths:"#3F9E8F", bluetree:"#3F8FB0", primeplus:"#B08A3A"
+    mindstretcher:"#5A6FC4", ottodot:"#C97A46", mastermaths:"#3F9E8F", bluetree:"#3F8FB0", primeplus:"#B08A3A", bestminds:"#B0577F"
   };
   var orgColors = Object.assign({}, DEFAULT_ORG_COLORS);
   function applyOrgColors(){
-    ORG_ORDER.forEach(function(o){ document.documentElement.style.setProperty("--org-"+o, orgColors[o]); });
+    COLOR_ORGS.forEach(function(o){ document.documentElement.style.setProperty("--org-"+o, orgColors[o]); });
   }
   async function saveOrgColor(org, hex){
     orgColors[org] = hex;
@@ -1176,6 +1196,8 @@
   var customOrgsLoaded = false;
   var editingOrgId = null;     // which custom org is being edited in Settings
   var payments = {};           // "org_YYYY-MM" -> payment marker doc
+  var markingBatches = [];     // BestMinds batches of scripts to mark
+  var markingSettings = { stage:"trainee", rates:{} }; // current marker stage and the per-script rate for each
 
   var mainEl = document.getElementById("main");
   var sectionLabelEl = document.getElementById("sectionLabel");
@@ -1235,6 +1257,16 @@
       renderAll();
     }, function(err){ console.error("payments onSnapshot", err); });
 
+    db.collection("marking").onSnapshot(function(snap){
+      markingBatches = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); });
+      renderAll();
+    }, function(err){ console.error("marking onSnapshot", err); });
+
+    db.doc("settings/marking").onSnapshot(function(snap){
+      markingSettings = Object.assign({ stage:"trainee", rates:{} }, snap.exists ? snap.data() : {});
+      if (currentTab === "settings") renderSettings();
+    }, function(err){ console.error("marking settings onSnapshot", err); });
+
     db.collection("leaves").onSnapshot(function(snap){
       leaves = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); })
         .sort(function(a,b){ return a.start < b.start ? -1 : 1; });
@@ -1247,6 +1279,281 @@
   // repeating classes can't bring them back, and removing the leave restores them.
   function liveClasses(){ return classes.filter(function(c){ return !c.deletedAt; }); }
   function activeClasses(){ return liveClasses().filter(function(c){ return !leaveForClass(c); }); }
+
+  // ---------------- BestMinds marking ----------------
+  // Scripts come in batches, each with a due date, and are paid per script. The rate depends on the
+  // marker stage; a batch keeps the rate it was added with, so a promotion doesn't change past pay.
+  // A finished batch is income on the day it was finished; an open one is projected on its due date.
+  var MARKING_STAGES = [["trainee","Trainee"],["beginner","Beginner"],["competent","Competent"],["expert","Expert"]];
+  function stageLabel(key){
+    var st = MARKING_STAGES.find(function(s){ return s[0] === key; });
+    return st ? st[1] : key;
+  }
+  function stageRate(stage){ return Number(markingSettings.rates && markingSettings.rates[stage]) || 0; }
+  function findBatch(id){ return markingBatches.find(function(b){ return b.id === id; }) || null; }
+  function liveBatches(){ return markingBatches.filter(function(b){ return !b.deletedAt; }); }
+  function openBatches(){
+    return liveBatches().filter(function(b){ return !b.doneDate; })
+      .sort(function(a, b){ return a.due < b.due ? -1 : a.due > b.due ? 1 : 0; });
+  }
+  function batchIncome(b){ return Math.round((Number(b.scripts)||0) * (Number(b.rate)||0) * 100) / 100; }
+  function batchTitle(b){ return b.label ? escapeHtml(b.label) : "Marking"; }
+  // Everything that earns money: classes plus marking batches, in the shape the totals expect.
+  function incomeItems(){
+    return activeClasses().concat(liveBatches().map(function(b){
+      return { org:MARKING_ORG, date:b.doneDate || b.due, income:batchIncome(b), pending:!b.doneDate };
+    }));
+  }
+  function shortDay(dateStr){
+    return new Date(dateStr+"T00:00:00").toLocaleDateString("en-SG",{weekday:"short", day:"numeric", month:"short"});
+  }
+  function dueText(b){
+    var today = todayStr();
+    if (b.doneDate) return "Done "+shortDay(b.doneDate);
+    if (b.due < today) return "Overdue · "+shortDay(b.due);
+    if (b.due === today) return "Due today";
+    if (b.due === addDays(today, 1)) return "Due tomorrow";
+    return "Due "+shortDay(b.due);
+  }
+  // Marking the last script finishes the batch today; un-marking one reopens it.
+  function progressPatch(b, marked){
+    var total = Number(b.scripts) || 0;
+    marked = Math.max(0, Math.min(total, Math.round(Number(marked) || 0)));
+    return { marked:marked, doneDate: total > 0 && marked >= total ? (b.doneDate || todayStr()) : null };
+  }
+  async function addBatch(f){
+    if (!db) return;
+    await db.collection("marking").add({
+      label:f.label, scripts:f.scripts, marked:0, due:f.due, rate:f.rate, stage:markingSettings.stage,
+      doneDate:null, deletedAt:null, createdAt:Date.now()
+    });
+  }
+  async function updateBatch(id, patch){
+    if (!db) return;
+    try{ await db.collection("marking").doc(id).update(patch); }
+    catch(e){ console.error("updateBatch", e); showToast("Couldn't save. Check your connection."); }
+  }
+  function markOne(id){
+    var b = findBatch(id);
+    if (!b) return;
+    var patch = progressPatch(b, (Number(b.marked)||0) + 1);
+    updateBatch(id, patch);
+    if (patch.doneDate) showToast((b.label || "Marking")+" done · "+fmtMoney(batchIncome(b))+" earned");
+  }
+
+  function markingCardHtml(){
+    var today = todayStr();
+    var rows = openBatches().map(function(b){
+      var total = Number(b.scripts) || 0, marked = Number(b.marked) || 0;
+      var dueClass = b.due < today ? " late" : b.due <= addDays(today, 1) ? " soon" : "";
+      return '<div class="mk-row" data-batch="'+b.id+'">'+
+        '<div class="mk-top"><span class="mk-name">'+batchTitle(b)+'</span><span class="mk-due'+dueClass+'">'+dueText(b)+'</span></div>'+
+        '<div class="mk-bottom"><div class="mk-bar"><i style="width:'+(total ? marked/total*100 : 0)+'%"></i></div>'+
+          '<span class="mk-count mono">'+marked+'/'+total+'</span>'+
+          '<button class="pay-pill" data-mark-one="'+b.id+'" aria-label="Marked one more script">+1</button></div>'+
+      '</div>';
+    }).join("") || '<div class="empty-note">No scripts waiting to be marked.</div>';
+    var ym = today.slice(0,7);
+    var doneThisMonth = liveBatches().filter(function(b){ return b.doneDate && b.doneDate.slice(0,7) === ym; });
+    var scripts = doneThisMonth.reduce(function(s, b){ return s + (Number(b.scripts)||0); }, 0);
+    var amount = doneThisMonth.reduce(function(s, b){ return s + batchIncome(b); }, 0);
+    var footer = liveBatches().length
+      ? '<button class="owed-footer" id="markingAll"><span>'+(scripts ? 'Marked this month: '+scripts+' script'+(scripts===1?'':'s') : 'All batches')+'</span>'+
+          '<span>'+(scripts ? '<b class="mono">'+fmtMoney(amount)+'</b> ' : '')+'›</span></button>'
+      : '';
+    return '<div class="card marking-card">'+
+      '<h2 style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">'+
+        '<span><span class="dot" style="background:'+orgMeta(MARKING_ORG).color+'"></span> Marking</span>'+
+        '<button class="link-btn" id="newBatchLink" style="font-size:11.5px;">+ New batch</button></h2>'+
+      rows+footer+
+    '</div>';
+  }
+  function bindMarkingCard(){
+    mainEl.querySelectorAll(".mk-row[data-batch]").forEach(function(row){
+      row.addEventListener("click", function(e){
+        var plus = e.target.closest("[data-mark-one]");
+        if (plus) markOne(plus.getAttribute("data-mark-one"));
+        else openBatch(row.getAttribute("data-batch"));
+      });
+    });
+    var all = document.getElementById("markingAll");
+    if (all) all.addEventListener("click", openAllBatches);
+    document.getElementById("newBatchLink").addEventListener("click", function(){ addOrg = MARKING_ORG; setTab("add"); });
+  }
+
+  // The batch fields, shared by the Add tab (b = null) and the edit popup.
+  function batchFormHtml(b){
+    var rate = b ? b.rate : stageRate(markingSettings.stage);
+    return '<div class="field"><label>Paper / class (optional)</label>'+
+        '<input type="text" id="bLabel" placeholder="e.g. P6 Science WA2" value="'+attrEscape(b && b.label)+'"></div>'+
+      '<div class="field"><label>Number of scripts</label>'+
+        '<input type="number" id="bScripts" min="1" step="1" placeholder="25" value="'+(b ? b.scripts : "")+'"></div>'+
+      (b ? '<div class="field"><label>Marked so far</label><input type="number" id="bMarked" min="0" step="1" value="'+(Number(b.marked)||0)+'"></div>' : '')+
+      '<div class="field"><label>Due date</label><input type="date" id="bDue" value="'+(b ? b.due : addDays(todayStr(), 7))+'"></div>'+
+      '<div class="field"><label>Pay per script ($)</label>'+
+        '<input type="number" id="bRate" min="0" step="0.05" placeholder="0.00" value="'+(rate || "")+'"></div>'+
+      '<div class="ih-hint" id="bTotal" style="margin:-4px 0 14px;"></div>';
+  }
+  // Returns a reader for the form: the fields, or null (with a toast) if something's missing.
+  function wireBatchForm(root, b){
+    function val(id){ return root.querySelector("#"+id); }
+    function updateTotal(){
+      var scripts = Number(val("bScripts").value) || 0, rate = Number(val("bRate").value) || 0;
+      val("bTotal").textContent = !rate && !b
+        ? "Your "+stageLabel(markingSettings.stage)+" rate isn't set yet. Add it in Settings → BestMinds marking, or type it here."
+        : scripts ? scripts+" scripts × "+fmtMoney(rate)+" = "+fmtMoney(Math.round(scripts*rate*100)/100) : "";
+    }
+    ["bScripts","bRate"].forEach(function(id){ val(id).addEventListener("input", updateTotal); });
+    updateTotal();
+    return function(){
+      var f = {
+        label: val("bLabel").value.trim(),
+        scripts: Math.round(Number(val("bScripts").value) || 0),
+        due: val("bDue").value,
+        rate: Math.round((Number(val("bRate").value) || 0) * 100) / 100
+      };
+      if (val("bMarked")) f.marked = val("bMarked").value;
+      if (f.scripts < 1){ showToast("Enter how many scripts"); return null; }
+      if (!f.due){ showToast("Pick a due date"); return null; }
+      return f;
+    };
+  }
+
+  function renderNewBatchForm(){
+    sectionLabelEl.textContent = "Add marking";
+    mainEl.innerHTML =
+      '<button class="back-link" id="backBtn">← Choose a different organisation</button>'+
+      '<div class="card"><h2>BestMinds marking batch</h2>'+
+        batchFormHtml(null)+
+        '<button class="save-btn" id="batchSaveBtn">Add batch</button>'+
+      '</div>';
+    document.getElementById("backBtn").addEventListener("click", function(){ addOrg = null; renderAdd(); });
+    var read = wireBatchForm(mainEl, null);
+    document.getElementById("batchSaveBtn").addEventListener("click", async function(){
+      var f = read();
+      if (!f) return;
+      try{ await addBatch(f); }
+      catch(e){ console.error("addBatch", e); showToast("Couldn't save. Check your connection."); return; }
+      showToast("Batch added · due "+shortDay(f.due));
+      addOrg = null;
+      setTab("dashboard");
+    });
+  }
+
+  function openBatch(id){
+    var b = findBatch(id);
+    if (!b) return;
+    var overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = '<div class="modal-card">'+
+      '<div class="modal-head"><h3>'+batchTitle(b)+'</h3><button class="icon-btn" data-close aria-label="Close">✕</button></div>'+
+      '<div class="ih-hint" style="margin:-6px 0 12px;">BestMinds · '+dueText(b)+(b.stage ? ' · '+stageLabel(b.stage)+' rate' : '')+'</div>'+
+      batchFormHtml(b)+
+      '<button class="save-btn" id="batchSaveBtn">Save</button>'+
+      '<div style="display:flex;gap:8px;margin-top:10px;">'+
+        (b.doneDate ? '' : '<button class="pay-pill" id="batchDoneBtn" style="flex:1;padding:10px;margin:0;font-size:12px;">All marked ✓</button>')+
+        '<button class="pay-pill" id="batchDeleteBtn" style="flex:1;padding:10px;margin:0;font-size:12px;color:var(--danger);">Delete batch</button>'+
+      '</div>'+
+    '</div>';
+    document.body.appendChild(overlay);
+    function close(){ overlay.remove(); }
+    overlay.addEventListener("click", function(e){ if (e.target === overlay || e.target.closest("[data-close]")) close(); });
+    var read = wireBatchForm(overlay, b);
+    overlay.querySelector("#batchSaveBtn").addEventListener("click", function(){
+      var f = read();
+      if (!f) return;
+      var patch = Object.assign({ label:f.label, scripts:f.scripts, due:f.due, rate:f.rate },
+        progressPatch(Object.assign({}, b, { scripts:f.scripts }), f.marked));
+      updateBatch(b.id, patch);
+      close();
+    });
+    var doneBtn = overlay.querySelector("#batchDoneBtn");
+    if (doneBtn) doneBtn.addEventListener("click", function(){
+      updateBatch(b.id, progressPatch(b, b.scripts));
+      showToast((b.label || "Marking")+" done · "+fmtMoney(batchIncome(b))+" earned");
+      close();
+    });
+    overlay.querySelector("#batchDeleteBtn").addEventListener("click", function(){
+      if (!window.confirm("Delete this batch? Its income comes off your totals.")) return;
+      updateBatch(b.id, { deletedAt:Date.now() });
+      close();
+    });
+  }
+
+  // Every batch: the ones still to mark, then finished ones month by month, newest first.
+  function openAllBatches(){
+    var open = openBatches();
+    var done = liveBatches().filter(function(b){ return b.doneDate; })
+      .sort(function(a, b){ return a.doneDate < b.doneDate ? 1 : -1; });
+    function row(b){
+      return '<button class="ih-row" data-batch="'+b.id+'">'+
+        '<span class="ih-month">'+batchTitle(b)+'</span>'+
+        '<span class="ih-split mono">'+b.scripts+' scripts · '+dueText(b)+'</span>'+
+        '<span class="ih-total mono">'+fmtMoney(batchIncome(b))+'</span>'+
+      '</button>';
+    }
+    var html = open.length ? '<div class="ih-section">To mark</div>'+open.map(row).join("") : '';
+    var month = null;
+    done.forEach(function(b){
+      var ym = b.doneDate.slice(0,7);
+      if (ym !== month){
+        month = ym;
+        var list = done.filter(function(x){ return x.doneDate.slice(0,7) === ym; });
+        var scripts = list.reduce(function(s, x){ return s + (Number(x.scripts)||0); }, 0);
+        var amount = list.reduce(function(s, x){ return s + batchIncome(x); }, 0);
+        html += '<div class="ih-section">'+monthLabelShort(ym)+' · '+scripts+' scripts · '+fmtMoney(amount)+'</div>';
+      }
+      html += row(b);
+    });
+    var overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = '<div class="modal-card income-modal">'+
+      '<div class="modal-head"><h3>BestMinds marking</h3><button class="icon-btn" data-close aria-label="Close">✕</button></div>'+
+      '<div class="ih-list">'+(html || '<div class="empty-note">No batches yet.</div>')+'</div>'+
+    '</div>';
+    document.body.appendChild(overlay);
+    function close(){ overlay.remove(); }
+    overlay.addEventListener("click", function(e){ if (e.target === overlay || e.target.closest("[data-close]")) close(); });
+    overlay.querySelectorAll("[data-batch]").forEach(function(btn){
+      btn.addEventListener("click", function(){ close(); openBatch(btn.getAttribute("data-batch")); });
+    });
+  }
+
+  function renderMarkingSettings(){
+    var stage = markingSettings.stage;
+    return '<div class="card"><h2>BestMinds marking</h2>'+
+      '<div class="field"><label>Your marker stage</label><div class="choice-row" id="mkStage">'+
+        MARKING_STAGES.map(function(s){ return '<button data-val="'+s[0]+'" class="'+(stage===s[0]?"active":"")+'">'+s[1]+'</button>'; }).join("")+
+      '</div></div>'+
+      '<div class="field"><label>Pay per script ($)</label><div class="mk-rates">'+
+        MARKING_STAGES.map(function(s){
+          return '<label class="mk-rate"><span>'+s[1]+'</span><input type="number" min="0" step="0.05" placeholder="0.00" data-stage-rate="'+s[0]+'" value="'+(stageRate(s[0]) || "")+'"></label>';
+        }).join("")+
+      '</div></div>'+
+      '<button id="saveMarkingBtn" style="width:100%;background:var(--grad);color:var(--on-gradient);border:none;border-radius:999px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;">Save</button>'+
+      '<div class="ih-hint" style="margin-top:8px;">New batches use your current stage\'s rate. Batches you\'ve already added keep theirs.</div>'+
+    '</div>';
+  }
+  function bindMarkingSettings(){
+    var stageBtns = mainEl.querySelectorAll("#mkStage button");
+    stageBtns.forEach(function(btn){
+      btn.addEventListener("click", function(){
+        stageBtns.forEach(function(x){ x.classList.remove("active"); });
+        btn.classList.add("active");
+      });
+    });
+    document.getElementById("saveMarkingBtn").addEventListener("click", async function(){
+      var active = mainEl.querySelector("#mkStage button.active");
+      var rates = {};
+      mainEl.querySelectorAll("[data-stage-rate]").forEach(function(inp){
+        rates[inp.getAttribute("data-stage-rate")] = Math.round((Number(inp.value) || 0) * 100) / 100;
+      });
+      try{
+        await db.doc("settings/marking").set({ stage: active ? active.getAttribute("data-val") : "trainee", rates:rates });
+        showToast("Marking rates saved");
+      }catch(e){ console.error("saveMarking", e); showToast("Couldn't save. Check your connection."); }
+    });
+  }
 
   // ---------------- overseas trips ----------------
   // A trip is either working (classes go on as usual) or not working (every class in it is skipped,
@@ -2227,12 +2534,17 @@
 
   function renderSettings(){
     sectionLabelEl.textContent = "Settings";
-    var rows = ORG_ORDER.map(function(org){
+    var rows = COLOR_ORGS.map(function(org){
       var meta = ORG_META[org];
       var hex = orgColors[org];
       return '<div class="settings-row">'+
         '<div class="settings-label"><span class="dot swatch-dot" style="background:'+hex+'"></span>'+meta.label+'</div>'+
         '<input type="color" class="color-input" data-org="'+org+'" value="'+hex+'">'+
+      '</div>';
+    }).join("") + customOrgs.map(function(o){
+      return '<div class="settings-row">'+
+        '<div class="settings-label"><span class="dot swatch-dot" style="background:'+o.color+'"></span>'+escapeHtml(o.label)+'</div>'+
+        '<input type="color" class="color-input" data-custom-org="'+o.id+'" value="'+o.color+'">'+
       '</div>';
     }).join("");
     mainEl.innerHTML =
@@ -2251,6 +2563,7 @@
         '<button id="resetColorsBtn" style="margin-top:16px;width:100%;background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:999px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;">Reset to defaults</button>'+
       '</div>'+
       renderCustomOrgsSection()+
+      renderMarkingSettings()+
       renderAccountSection();
     document.getElementById("settingsBack").addEventListener("click", function(){ setTab("dashboard"); });
     mainEl.querySelectorAll(".color-input[data-org]").forEach(function(inp){
@@ -2260,7 +2573,18 @@
         if (dot) dot.style.background = inp.value;
       });
     });
+    // Custom centres save once the picker closes: each save re-renders Settings and re-syncs the calendar.
+    mainEl.querySelectorAll(".color-input[data-custom-org]").forEach(function(inp){
+      inp.addEventListener("input", function(){
+        var dot = inp.closest(".settings-row").querySelector(".swatch-dot");
+        if (dot) dot.style.background = inp.value;
+      });
+      inp.addEventListener("change", function(){
+        if (db) db.collection("orgs").doc(inp.getAttribute("data-custom-org")).update({ color: inp.value });
+      });
+    });
     document.getElementById("resetColorsBtn").addEventListener("click", resetOrgColors);
+    bindMarkingSettings();
     bindLeaveSection();
     bindExportSection();
     bindTimesheetSection();
@@ -2312,10 +2636,10 @@
   function periodTotals(range, orgFilter){
     var today = todayStr();
     var earned = 0, projected = 0;
-    activeClasses().forEach(function(c){
+    incomeItems().forEach(function(c){
       if (c.date < range[0] || c.date > range[1]) return;
       if (orgFilter && orgFilter !== "all" && c.org !== orgFilter) return;
-      if (c.date <= today) earned += c.income; else projected += c.income;
+      if (c.date <= today && !c.pending) earned += c.income; else projected += c.income;
     });
     return { earned:earned, projected:projected, combined:earned+projected };
   }
@@ -2323,11 +2647,11 @@
   function orgBreakdown(range){
     var today = todayStr();
     var map = {};
-    allOrgKeys().forEach(function(o){ map[o] = {earned:0, projected:0}; });
-    activeClasses().forEach(function(c){
+    incomeOrgKeys().forEach(function(o){ map[o] = {earned:0, projected:0}; });
+    incomeItems().forEach(function(c){
       if (c.date < range[0] || c.date > range[1]) return;
       if (!map[c.org]) map[c.org] = {earned:0, projected:0};
-      if (c.date <= today) map[c.org].earned += c.income; else map[c.org].projected += c.income;
+      if (c.date <= today && !c.pending) map[c.org].earned += c.income; else map[c.org].projected += c.income;
     });
     return map;
   }
@@ -2556,8 +2880,8 @@
   function owedList(){
     var thisMonth = todayStr().slice(0,7);
     var map = {};
-    activeClasses().forEach(function(c){
-      if (!c.date || !c.income) return;
+    incomeItems().forEach(function(c){
+      if (!c.date || !c.income || c.pending) return;
       var ym = c.date.slice(0,7);
       if (ym >= thisMonth) return;
       var key = c.org+"_"+ym;
@@ -2747,7 +3071,7 @@
 
   // Full month-by-month history, from the first month with a class to the last (future months are projected).
   function openIncomeHistory(){
-    var dates = activeClasses().map(function(c){ return c.date; }).filter(Boolean).sort();
+    var dates = incomeItems().map(function(c){ return c.date; }).filter(Boolean).sort();
     var thisMonth = todayStr().slice(0,7);
     var first = dates.length ? dates[0].slice(0,7) : thisMonth;
     var last = dates.length ? dates[dates.length-1].slice(0,7) : thisMonth;
@@ -2803,7 +3127,7 @@
   function openOrgTrend(org){
     var meta = orgMeta(org);
     var thisMonth = todayStr().slice(0,7);
-    var dates = activeClasses().filter(function(c){ return c.org === org; }).map(function(c){ return c.date; }).sort();
+    var dates = incomeItems().filter(function(c){ return c.org === org; }).map(function(c){ return c.date; }).sort();
     var first = dates.length ? dates[0].slice(0,7) : thisMonth;
     var last = dates.length ? dates[dates.length-1].slice(0,7) : thisMonth;
     if (first < shiftMonth(thisMonth, -11)) first = shiftMonth(thisMonth, -11);
@@ -2916,7 +3240,7 @@
         '<div class="cal-summary">Total <span class="mono">'+fmtMoney(yTotals.combined)+'</span> — '+fmtMoney(yTotals.earned)+' earned · '+fmtMoney(yTotals.projected)+' projected</div>'+
         yearStatsHtml(breakdownYear);
     }
-    var rowsHtml = allOrgKeys().map(function(org){
+    var rowsHtml = incomeOrgKeys().map(function(org){
       var v = bd[org] || {earned:0, projected:0};
       var combined = v.earned + v.projected;
       if (combined === 0) return "";
@@ -2936,10 +3260,10 @@
     if (!rowsHtml) rowsHtml = '<div class="empty-note">No classes logged for this period yet.</div>';
 
     var bdTotal = 0;
-    allOrgKeys().forEach(function(o){ var v = bd[o]; if (v) bdTotal += v.earned + v.projected; });
+    incomeOrgKeys().forEach(function(o){ var v = bd[o]; if (v) bdTotal += v.earned + v.projected; });
     var shareBarHtml = "";
     if (bdTotal > 0){
-      shareBarHtml = '<div class="sharebar">'+allOrgKeys().map(function(o){
+      shareBarHtml = '<div class="sharebar">'+incomeOrgKeys().map(function(o){
         var v = bd[o]; var amt = v ? v.earned + v.projected : 0;
         return amt > 0 ? '<i style="width:'+(amt/bdTotal*100)+'%;background:'+orgMeta(o).color+'"></i>' : "";
       }).join("")+'</div>';
@@ -2951,6 +3275,7 @@
         clashAlertHtml()+
         reliefAlertHtml()+
         '<div class="period-scroller">'+cardsHtml+'</div>'+
+        markingCardHtml()+
         comingUpHtml()+
       '</div>'+
       '<div class="dash-col col-b">'+
@@ -2974,12 +3299,14 @@
             quickBtn("bluetree","Bluetree")+
             quickBtn("primeplus","PrimePlus")+
             customOrgs.map(function(o){ return quickBtn(o.id, o.label); }).join("")+
+            quickBtn(MARKING_ORG,"BestMinds marking")+
           '</div>'+
         '</div>'+
         trendHtml()+
       '</div>'+
     '</div>';
 
+    bindMarkingCard();
     var upNextEl = mainEl.querySelector(".upnext[data-detail]");
     if (upNextEl) upNextEl.addEventListener("click", function(){ openDetail(upNextEl.getAttribute("data-detail")); });
     mainEl.querySelectorAll(".cu-row[data-detail]").forEach(function(row){
@@ -3061,6 +3388,7 @@
             customOrgs.map(function(o){ return quickBtn(o.id, o.label); }).join("")+
             quickBtn("mindstretcher","Mind Stretcher")+
             quickBtn("ottodot","Ottodot")+
+            quickBtn(MARKING_ORG,"BestMinds marking")+
             '<button class="quickbtn new" data-quick="__new__"><span class="swatch">+</span>New centre</button>'+
           '</div>'+
         '</div>'+
@@ -3071,6 +3399,7 @@
       return;
     }
     if (addOrg === "__new__"){ renderNewOrgForm(); return; }
+    if (addOrg === MARKING_ORG){ renderNewBatchForm(); return; }
     var org = addOrg;
     var today = todayStr();
     var needsLevelChoice = org === "bluetree" || org === "mindstretcher";
