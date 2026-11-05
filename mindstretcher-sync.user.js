@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mind Stretcher -> Teaching Ledger Sync
 // @namespace    shraddha-teaching-ledger
-// @version      1.5
+// @version      1.9
 // @description  Reads your Dash schedule + attendance and writes classes straight into your Teaching Ledger (Firestore). No copy-paste.
 // @match        https://dash.mindstretcher.com/teacher/my-schedule/*
 // @grant        GM_getValue
@@ -53,6 +53,11 @@
     if (/^OL\b/i.test(t)) return "secondary"; // O-Level = Sec 4
     return null;
   }
+
+  // A class where every student is a makeup (holiday makeup classes) pays a flat rate per
+  // 2-hour session instead of the class-size table: $56 primary and $67 secondary on the payment
+  // statements ($65 / $78 with employer CPF). Pre-primary ($53 with CPF) is assumed to be $46.
+  var MAKEUP_SESSION_RATES = { preprimary: 46, p1_p4: 56, p5_p6: 56, p5_p6_writing: 56, secondary: 67 };
 
   function rateFor(level, weekend, size) {
     var table = MINDSTRETCHER_RATES[level];
@@ -368,9 +373,13 @@
   function saveWeeksAhead(n) {
     try { localStorage.setItem(WEEKS_AHEAD_KEY, String(n)); } catch (e) {}
   }
-  // "quick" = this week onwards; "full" = also re-checks all of last month.
+  // "quick" = this week onwards; "full" = also re-checks all of last month;
+  // "history" = everything since HISTORY_FROM, for filling in past months once.
+  var HISTORY_FROM = "2026-01-01";
   function buildScanWindow(today, mode, weeksAhead) {
-    var startMonday = mode === "quick" ? mondayOnOrBefore(today) : mondayOnOrBefore(firstOfPrevMonth(today));
+    var startMonday = mode === "quick" ? mondayOnOrBefore(today)
+      : mode === "history" ? mondayOnOrBefore(HISTORY_FROM)
+      : mondayOnOrBefore(firstOfPrevMonth(today));
     var horizon = addDaysToDateStr(today, weeksAhead * 7);
     var weeks = [];
     for (var w = startMonday; w <= horizon; w = addDaysToDateStr(w, 7)) weeks.push(w);
@@ -380,6 +389,7 @@
   // ---------------- UI ----------------
   var QUICK_LABEL = "Quick sync (this week onwards)";
   var FULL_LABEL = "Full sync (incl. last month)";
+  var HISTORY_LABEL = "History sync (since Jan 2026)";
   function makeUi() {
     var box = document.createElement("div");
     box.style.cssText =
@@ -391,11 +401,13 @@
         '<input id="tl-weeks" type="number" min="1" max="' + MAX_WEEKS_AHEAD + '" step="1" style="width:64px;padding:4px 6px;border:none;border-radius:6px;"></label>' +
       '<button id="tl-quick-btn" style="width:100%;padding:10px;border:none;border-radius:8px;background:#7C3FA0;color:#fff;font-weight:700;cursor:pointer;margin-bottom:6px;">' + QUICK_LABEL + '</button>' +
       '<button id="tl-sync-btn" style="width:100%;padding:8px;border:1px solid #7C3FA0;border-radius:8px;background:transparent;color:#fff;font-weight:600;cursor:pointer;">' + FULL_LABEL + '</button>' +
+      '<button id="tl-history-btn" style="width:100%;padding:6px;margin-top:6px;border:none;border-radius:8px;background:transparent;color:#cbb6dc;font-size:12px;text-decoration:underline;cursor:pointer;">' + HISTORY_LABEL + '</button>' +
       '<div id="tl-sync-status" style="margin-top:8px;font-size:12px;opacity:.85;white-space:pre-wrap;max-height:160px;overflow-y:auto;"></div>';
     document.body.appendChild(box);
     return {
       quickButton: box.querySelector("#tl-quick-btn"),
       button: box.querySelector("#tl-sync-btn"),
+      historyButton: box.querySelector("#tl-history-btn"),
       weeks: box.querySelector("#tl-weeks"),
       status: box.querySelector("#tl-sync-status")
     };
@@ -408,9 +420,11 @@
     function setBusy(busy, mode) {
       ui.quickButton.disabled = busy;
       ui.button.disabled = busy;
+      ui.historyButton.disabled = busy;
       ui.weeks.disabled = busy;
       ui.quickButton.textContent = busy && mode === "quick" ? "Syncing…" : QUICK_LABEL;
       ui.button.textContent = busy && mode === "full" ? "Syncing…" : FULL_LABEL;
+      ui.historyButton.textContent = busy && mode === "history" ? "Syncing… (this takes a few minutes)" : HISTORY_LABEL;
     }
 
     async function runSync(mode) {
@@ -432,7 +446,7 @@
         var startMonday = scan.startMonday;
         var scanEnd = scan.scanEnd;
         var weeks = scan.weeks;
-        say((mode === "quick" ? "Quick sync: " : "Full sync: ") + weeks.length + " weeks from " + startMonday + ".");
+        say((mode === "quick" ? "Quick sync: " : mode === "history" ? "History sync: " : "Full sync: ") + weeks.length + " weeks from " + startMonday + ".");
 
         say("Checking what's already synced…");
         var existingList = await fetchExistingSyncedDocs();
@@ -463,8 +477,9 @@
             }
             if (att.total === null) { skippedNoAttendance++; continue; }
             var billableSize = Math.max(0, att.total - att.makeupCount);
+            var allMakeup = billableSize === 0 && att.makeupCount > 0;
             var weekend = s.weekday === "Sat" || s.weekday === "Sun";
-            var rate = rateFor(level, weekend, billableSize);
+            var rate = allMakeup ? MAKEUP_SESSION_RATES[level] / 2 : rateFor(level, weekend, billableSize);
             var income = Math.round(rate * s.durationHours * 100) / 100;
             var docId = "mindstretcher_" + s.sessionId;
 
@@ -485,6 +500,7 @@
               level: level,
               weekdayOrWeekend: weekend ? "weekend" : "weekday",
               studentCount: billableSize,
+              makeup: allMakeup,
               classLabel: s.title,
               rate: rate,
               income: income,
@@ -521,9 +537,10 @@
         }
         if (skippedNoAttendance) say(skippedNoAttendance + " skipped (couldn't read attendance).");
 
-        say("Checking for classes removed from Dash…");
         var removed = 0;
-        try {
+        // Dash drops old weeks, so a history sync never treats a missing class as removed.
+        if (mode !== "history") try {
+          say("Checking for classes removed from Dash…");
           for (var ai = 0; ai < existingList.length; ai++) {
             var doc = existingList[ai];
             if (doc.deletedAt) continue; // already inactive
@@ -564,6 +581,7 @@
 
     ui.quickButton.addEventListener("click", function () { runSync("quick"); });
     ui.button.addEventListener("click", function () { runSync("full"); });
+    ui.historyButton.addEventListener("click", function () { runSync("history"); });
   }
 
   if (document.readyState === "loading") {

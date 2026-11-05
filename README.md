@@ -42,6 +42,7 @@ Live at: https://shraddha-income-tracker.web.app
   - Titles are short: `MS P5 Science Katong`, `Otto P4 Sci`. The place only shows when it isn't the centre's usual.
   - Regular classes are Peacock (blue), relief classes Lavender (purple). Mind Stretcher uses Dash's RELIEF tag and Ottodot its relief-teacher column; otherwise a class counts as regular if it repeats weekly.
   - Classes on not-working trips are left off. Events added by hand in the calendar are never touched.
+  - Income that isn't a class (e.g. internship pay) is kept off the calendar with `calendar: false` on the entry.
   - Marking batches are all-day Tangerine events on the due date (`BM marking 25 scripts P6 Science WA2`), ticked ✓ once finished.
 
 ## Structure
@@ -52,7 +53,7 @@ Live at: https://shraddha-income-tracker.web.app
 - `public/manifest.json`, `public/sw.js` and the icons make it installable.
   - The service worker caches nothing, so new deploys show up straight away.
 - `firestore.rules`: only the owner's Firebase account (matched by UID) can read or write.
-- `mindstretcher-sync.user.js`: Tampermonkey script that runs on Dash (`dash.mindstretcher.com`). It reads the schedule (including each class's venue and RELIEF tag) and attendance, then writes classes straight into Firestore.
+- `mindstretcher-sync.user.js`: Tampermonkey script that runs on Dash (`dash.mindstretcher.com`). It reads the schedule (including each class's venue and RELIEF tag) and attendance, then writes classes straight into Firestore. Classes where every student is a makeup are paid the flat holiday-makeup rate ($56 primary, $67 secondary per 2-hour session). "History sync" reads every week since January 2026 to fill in past classes; it never removes anything, since Dash drops old weeks.
 - `ottodot-sync.user.js`: Tampermonkey script that does the same from Ottodot's Airtable schedule. Classes where you're the relief teacher are saved with `relief: true`.
 - `functions/`: Cloud Functions (2nd gen, `asia-southeast1`) that keep the Google Calendar in step with `classes`.
   - `calendarSyncClass`: on any class write, updates that class's event (and the same slot a week either side, for the blue/purple colour).

@@ -73,9 +73,10 @@ function isRegular(c, slots) {
 }
 
 // The event a class should have, or null if it shouldn't be on the calendar
-// (deleted, before the ledger starts, or on a trip where you're not working).
+// (deleted, before the ledger starts, on a trip where you're not working, or income that isn't a
+// class, like internship pay, which is marked calendar: false).
 function eventFor(c, leaves, orgs, slots) {
-  if (!c || c.deletedAt || !c.date || c.date < LEDGER_START) return null;
+  if (!c || c.deletedAt || !c.date || c.date < LEDGER_START || c.calendar === false) return null;
   if (leaves.some((l) => !l.working && c.date >= l.start && c.date <= l.end)) return null;
   const custom = orgs[c.org];
   const centre = ORG_SHORT[c.org] || (custom && (custom.short || custom.label)) || "Class";
