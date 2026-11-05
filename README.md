@@ -15,7 +15,7 @@ Live at: https://shraddha-income-tracker.web.app
     - tap a centre to see its month-by-month trend
     - "$/hour" shows the hourly rate each centre works out to
   - Monthly income chart with an optional goal line. Tap it for the year view and its stats.
-  - Payments: mark each centre's month as paid, with a reminder for finished months still unpaid.
+  - Payments: mark each centre's month as paid, with a reminder for finished months still unpaid. With a pay date set, each unpaid month shows when it's due or how many days late it is.
   - Clash warnings: a banner when upcoming classes overlap. Each clash can be dismissed.
   - Relief reminder for overseas trips where classes still need cover.
   - BestMinds marking: open batches with their due dates and progress (tap +1 per script marked), and what's been marked this month.
@@ -35,6 +35,7 @@ Live at: https://shraddha-income-tracker.web.app
   - Overseas trips:
     - Working: classes count as usual.
     - Not working: classes are dropped from income. Relief is tracked per class.
+  - Pay dates: for each centre, when its pay should arrive in the next month (or the month after): a day of the month, the Nth working day (weekdays minus Singapore public holidays, listed in `SG_HOLIDAYS` up to 2027), or the 1st–4th/last of a weekday.
   - BestMinds marker stage (Trainee, Beginner, Competent, Expert) and the pay per script for each. New batches use the current stage's rate; existing batches keep theirs.
   - Centre colours and custom centres (name, hourly rate, colour, a short name for Google Calendar, and whether its classes are usually online, physical or vary).
 - **Google Calendar**: every class is mirrored into a shared Google Calendar within seconds (see `functions/`).
@@ -85,6 +86,7 @@ Live at: https://shraddha-income-tracker.web.app
 | `settings/colors`  | Centre colours.                                                   |
 | `settings/goals`   | Monthly income goal.                                              |
 | `settings/clashes` | Overlapping classes marked as fine.                               |
+| `settings/payDays` | Per centre `{day}`, `{workday}` or `{nth, weekday}`, plus `months`: when a month's pay is due, that many months later. |
 | `settings/marking` | BestMinds marker stage and pay per script for each stage.         |
 
 ## API key

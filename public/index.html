@@ -753,6 +753,13 @@
   .owed-name{ flex:1; min-width:0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .owed-month{ color:var(--ink-soft); font-weight:500; font-size:11.5px; }
   .owed-amt{ font-weight:700; font-size:12px; }
+  .owed-due{ display:block; white-space:normal; font-size:11px; font-weight:500; color:var(--ink-soft); margin-top:1px; }
+  .owed-due.late{ color:var(--danger); font-weight:700; }
+  .payday-row{ gap:10px; flex-wrap:wrap; }
+  .payday-fields [hidden]{ display:none; }
+  .payday-fields{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ink-soft); flex:0 0 auto; }
+  .payday-fields input, .payday-fields select{ font:inherit; font-family:'IBM Plex Mono', monospace; color:var(--ink); background:var(--surface-2); border:1px solid var(--line); border-radius:9px; padding:6px 7px; }
+  .payday-fields input{ width:44px; text-align:center; }
   .pay-pill{ flex:0 0 auto; border:1px solid var(--line); background:var(--surface-2); color:var(--ink-soft); border-radius:999px; padding:3px 9px; font-size:10.5px; font-weight:700; cursor:pointer; margin-left:6px; }
   .pay-pill:hover{ border-color:var(--accent); color:var(--accent); }
   .pay-pill.paid{ background:var(--grad); color:var(--on-gradient); border-color:transparent; }
@@ -1176,6 +1183,7 @@
   var breakdownPeriod = "month"; // today | week | month | year
   var breakdownYear = todayStr().slice(0,4); // which year the breakdown shows when period is "year"
   var monthlyGoal = 0;         // target combined income per month (0 = not set)
+  var payDays = {};            // org -> {day | workday | nth+weekday, months}: when a month's pay is due, that many months later
   var dismissedClashes = {};   // clashKey -> true for clashes the user said are fine
   var leaves = [];             // overseas trips {id, start, end, label, working, relief:{classId:true}}
   var leaveDraft = null;       // {start, end, label, working} typed into the trip form, kept across re-renders
@@ -1246,6 +1254,11 @@
       maybeMaterialize();
       renderAll();
     }, function(err){ console.error("orgs onSnapshot", err); });
+
+    db.doc("settings/payDays").onSnapshot(function(snap){
+      payDays = snap.exists ? snap.data() : {};
+      renderAll();
+    }, function(err){ console.error("payDays onSnapshot", err); });
 
     db.doc("settings/goals").onSnapshot(function(snap){
       monthlyGoal = snap.exists ? (Number(snap.data().monthly) || 0) : 0;
@@ -2529,6 +2542,67 @@
     });
   }
 
+  // Each centre's pay date: day N of the month after (or two after) the month worked.
+  function renderPayDaysSection(){
+    var rows = incomeOrgKeys().map(function(org){
+      var meta = orgMeta(org), p = payDays[org] || {};
+      return '<div class="settings-row payday-row">'+
+        '<div class="settings-label"><span class="dot swatch-dot" style="background:'+meta.color+'"></span>'+escapeHtml(meta.label)+'</div>'+
+        '<div class="payday-fields">'+
+          '<select data-paykind="'+org+'">'+
+            [["day","Day"],["work","Working day"],["1","1st"],["2","2nd"],["3","3rd"],["4","4th"],["-1","Last"]].map(function(k){
+              var on = p.nth ? String(p.nth) === k[0] : p.workday ? k[0] === "work" : k[0] === "day";
+              return '<option value="'+k[0]+'"'+(on?" selected":"")+'>'+k[1]+'</option>';
+            }).join("")+
+          '</select>'+
+          '<input type="number" min="1" max="31" step="1" placeholder="–" data-payday="'+org+'" value="'+(p.day || p.workday || "")+'"'+(p.nth?" hidden":"")+'>'+
+          '<select data-payweekday="'+org+'"'+(p.nth?"":" hidden")+'>'+
+            ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(function(d, i){
+              return '<option value="'+i+'"'+((p.weekday||0)===i?" selected":"")+'>'+d+'</option>';
+            }).join("")+
+          '</select> of '+
+          '<select data-paymonths="'+org+'">'+
+            '<option value="1"'+((p.months||1)===1?" selected":"")+'>next month</option>'+
+            '<option value="2"'+(p.months===2?" selected":"")+'>month after</option>'+
+          '</select></div>'+
+      '</div>';
+    }).join("");
+    return '<div class="card"><h2>Pay dates</h2>'+
+      '<div class="ih-hint" style="margin:-4px 0 6px;">When each centre should have paid for a month, e.g. for October\'s pay: "Day 10 of next month" is 10 Nov; "Working day 5" is the 5th weekday of November that isn\'t a public holiday; "2nd Mon" is the second Monday. If it\'s paid on either the 9th or 10th, use the later day. Leave the day blank if you don\'t know.</div>'+
+      rows+
+      '<button id="savePayDaysBtn" style="margin-top:14px;width:100%;background:var(--grad);color:var(--on-gradient);border:none;border-radius:999px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;">Save pay dates</button>'+
+    '</div>';
+  }
+  function bindPayDaysSection(){
+    // "Day" takes a date of the month; "1st".."Last" take a weekday instead.
+    mainEl.querySelectorAll("[data-paykind]").forEach(function(sel){
+      sel.addEventListener("change", function(){
+        var org = sel.getAttribute("data-paykind");
+        var takesNumber = sel.value === "day" || sel.value === "work";
+        mainEl.querySelector('[data-payday="'+org+'"]').hidden = !takesNumber;
+        mainEl.querySelector('[data-payweekday="'+org+'"]').hidden = takesNumber;
+      });
+    });
+    document.getElementById("savePayDaysBtn").addEventListener("click", async function(){
+      var out = {};
+      mainEl.querySelectorAll("[data-paykind]").forEach(function(sel){
+        var org = sel.getAttribute("data-paykind");
+        var months = Number(mainEl.querySelector('[data-paymonths="'+org+'"]').value) || 1;
+        if (sel.value !== "day" && sel.value !== "work"){
+          out[org] = { nth:Number(sel.value), weekday:Number(mainEl.querySelector('[data-payweekday="'+org+'"]').value), months:months };
+          return;
+        }
+        var n = Math.round(Number(mainEl.querySelector('[data-payday="'+org+'"]').value) || 0);
+        if (sel.value === "work" && n >= 1 && n <= 23) out[org] = { workday:n, months:months };
+        else if (sel.value === "day" && n >= 1 && n <= 31) out[org] = { day:n, months:months };
+      });
+      try{
+        await db.doc("settings/payDays").set(out);
+        showToast("Pay dates saved");
+      }catch(e){ console.error("savePayDays", e); showToast("Couldn't save. Check your connection."); }
+    });
+  }
+
   function renderAccountSection(){
     var user = firebase.auth().currentUser;
     return '<div class="card"><h2>Account</h2>'+
@@ -2568,6 +2642,7 @@
         '<button id="resetColorsBtn" style="margin-top:16px;width:100%;background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:999px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;">Reset to defaults</button>'+
       '</div>'+
       renderCustomOrgsSection()+
+      renderPayDaysSection()+
       renderMarkingSettings()+
       renderAccountSection();
     document.getElementById("settingsBack").addEventListener("click", function(){ setTab("dashboard"); });
@@ -2590,6 +2665,7 @@
     });
     document.getElementById("resetColorsBtn").addEventListener("click", resetOrgColors);
     bindMarkingSettings();
+    bindPayDaysSection();
     bindLeaveSection();
     bindExportSection();
     bindTimesheetSection();
@@ -2881,6 +2957,44 @@
     return new Date(p[0], p[1]-1, 1).toLocaleDateString("en-SG",{month:"short", year:"numeric"});
   }
 
+  // Singapore public holidays on weekdays (including Mondays given in lieu), from MOM's lists.
+  // Add each new year's dates when MOM announces them (usually in June).
+  var SG_HOLIDAYS = {
+    "2026-01-01":1, "2026-02-17":1, "2026-02-18":1, "2026-04-03":1, "2026-05-01":1, "2026-05-27":1,
+    "2026-06-01":1, "2026-08-10":1, "2026-11-09":1, "2026-12-25":1,
+    "2027-01-01":1, "2027-02-08":1, "2027-03-10":1, "2027-03-26":1, "2027-05-17":1, "2027-05-20":1,
+    "2027-08-09":1, "2027-10-28":1
+  };
+  function isWorkingDay(dateStr){ return weekdayIdx(dateStr) < 5 && !SG_HOLIDAYS[dateStr]; }
+
+  // When a centre's pay for a month is due, e.g. October's pay by 7 Nov, by the 5th working day of
+  // November, or by its 2nd Monday; null if no pay date is set. nth -1 means the last such weekday;
+  // weekday 0 is Monday.
+  function payDueDate(org, ym){
+    var p = payDays[org];
+    if (!p || !(p.day || p.workday || p.nth)) return null;
+    var dueYm = shiftMonth(ym, p.months || 1);
+    var lastDay = monthRange(dueYm+"-01")[1];
+    if (p.day) return dueYm+"-"+pad(Math.min(p.day, Number(lastDay.slice(8,10))));
+    if (p.workday){
+      var d = dueYm+"-01", count = 0;
+      for (;;){
+        if (isWorkingDay(d) && ++count === p.workday) return d;
+        d = addDays(d, 1);
+      }
+    }
+    if (p.nth === -1) return addDays(lastDay, -((weekdayIdx(lastDay) - p.weekday + 7) % 7));
+    return addDays(dueYm+"-01", (p.weekday - weekdayIdx(dueYm+"-01") + 7) % 7 + 7 * (p.nth - 1));
+  }
+  function payDueHtml(org, ym){
+    var due = payDueDate(org, ym);
+    if (!due) return "";
+    var today = todayStr();
+    if (due >= today) return '<span class="owed-due">'+(due === today ? "Due today" : "Due "+shortDay(due))+'</span>';
+    var late = Math.round((new Date(today+"T00:00:00") - new Date(due+"T00:00:00")) / 86400000);
+    return '<span class="owed-due late">Late by '+late+' day'+(late===1?'':'s')+' · was due '+shortDay(due)+'</span>';
+  }
+
   // Finished months (before this one) with income that hasn't been marked paid, oldest first.
   function owedList(){
     var thisMonth = todayStr().slice(0,7);
@@ -2917,7 +3031,7 @@
       list.map(function(o){
         var meta = orgMeta(o.org);
         return '<div class="owed-row"><span class="dot" style="background:'+meta.color+'"></span>'+
-          '<span class="owed-name">'+meta.label+' <span class="owed-month">'+monthLabelShort(o.ym)+'</span></span>'+
+          '<span class="owed-name">'+meta.label+' <span class="owed-month">'+monthLabelShort(o.ym)+'</span>'+payDueHtml(o.org, o.ym)+'</span>'+
           '<span class="owed-amt mono">'+fmtMoney(o.amount)+'</span>'+
           '<button class="pay-pill" data-pay="'+o.org+'|'+o.ym+'|'+o.amount+'">Paid?</button></div>';
       }).join("")+
