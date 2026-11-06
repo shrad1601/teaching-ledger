@@ -264,7 +264,7 @@
   .dash .trend-card{ order:5; }
   .dash .comingup-card{ order:6; }
   .dash .marking-card{ order:2; }
-  .dash .pay-card{ order:2; }
+  .dash .pay-card{ order:4; }
   .pay-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(105px,1fr)); gap:8px; }
   .pay-tile{ background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:9px 10px; display:flex; flex-direction:column; gap:2px; min-width:0; }
   .pay-tile.main{ background:var(--accent-ink); border-color:var(--accent); }
@@ -272,6 +272,9 @@
   .pt-v{ font-size:17px; font-weight:800; color:var(--ink); }
   .pay-tile.main .pt-v{ color:var(--accent); }
   .pt-sub{ font-size:10.5px; color:var(--ink-soft); line-height:1.3; }
+  .pay-week{ display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:4px 10px; font-size:12px; color:var(--ink-soft); margin-top:12px; padding:9px 12px; border-radius:12px; background:var(--surface-2); border:1px solid var(--line); }
+  .pay-week > span:first-child{ font-weight:700; }
+  .pay-week b{ color:var(--ink); }
   .pay-rate-head{ display:flex; justify-content:space-between; font-size:11.5px; font-weight:700; color:var(--ink-soft); margin:14px 0 6px; }
   .rate-bars{ display:flex; gap:4px; align-items:stretch; height:110px; }
   .rb{ flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:3px; }
@@ -3259,6 +3262,14 @@
     });
     var employee = 0, sinda = 0, employer = 0;
     msCpfMonths(year, today).forEach(function(m){ employee += m.employee; sinda += m.sinda; employer += m.employer; });
+    // Average week since the year's first paid day, and this week (Mon–Sun) so far.
+    var firstDay = null, weekGross = 0, monday = mondayOf(today);
+    incomeItems().forEach(function(c){
+      if (!c.date || c.date.slice(0,4) !== year || c.date > today || c.pending) return;
+      if (!firstDay || c.date < firstDay) firstDay = c.date;
+      if (c.date >= monday) weekGross += c.income || 0;
+    });
+    var weeks = firstDay ? ((new Date(today+"T00:00:00") - new Date(firstDay+"T00:00:00")) / 86400000 + 1) / 7 : 0;
     var byMonth = {}, hours = 0, pay = 0;
     activeClasses().forEach(function(c){
       var h = Number(c.durationHours) || 0;
@@ -3283,6 +3294,7 @@
         tile("Gross pay", gross, "what centres pay you")+
         tile("With employer CPF", gross + employer, "+"+fmtWhole(employer)+" into your CPF")+
       '</div>'+
+      '<div class="pay-week"><span>Weekly pay</span><span><b class="mono">'+(weeks ? fmtWhole(gross / weeks) : "—")+'</b> avg a week · <b class="mono">'+fmtWhole(weekGross)+'</b> this week so far</span></div>'+
       '<div class="pay-rate-head"><span>Hourly rate by month</span><span class="mono">avg '+(hours ? fmtMoney(pay / hours) : "—")+'/h</span></div>'+
       '<div class="rate-bars">'+cols.map(function(c){
         var label = new Date(c.ym+"-01T00:00:00").toLocaleDateString("en-SG",{month:"short"});
@@ -3563,7 +3575,6 @@
         clashAlertHtml()+
         reliefAlertHtml()+
         '<div class="period-scroller">'+cardsHtml+'</div>'+
-        payCardHtml()+
         markingCardHtml()+
         comingUpHtml()+
       '</div>'+
@@ -3579,6 +3590,7 @@
           rowsHtml+
           owedFooterHtml()+
         '</div>'+
+        payCardHtml()+
       '</div>'+
       '<div class="dash-col col-c">'+
         '<div class="card quick-card">'+
