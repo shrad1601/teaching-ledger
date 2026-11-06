@@ -264,6 +264,22 @@
   .dash .trend-card{ order:5; }
   .dash .comingup-card{ order:6; }
   .dash .marking-card{ order:2; }
+  .dash .pay-card{ order:2; }
+  .pay-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(105px,1fr)); gap:8px; }
+  .pay-tile{ background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:9px 10px; display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .pay-tile.main{ background:var(--accent-ink); border-color:var(--accent); }
+  .pt-k{ font-size:10px; text-transform:uppercase; letter-spacing:0.08em; font-weight:700; color:var(--ink-soft); }
+  .pt-v{ font-size:17px; font-weight:800; color:var(--ink); }
+  .pay-tile.main .pt-v{ color:var(--accent); }
+  .pt-sub{ font-size:10.5px; color:var(--ink-soft); line-height:1.3; }
+  .pay-rate-head{ display:flex; justify-content:space-between; font-size:11.5px; font-weight:700; color:var(--ink-soft); margin:14px 0 6px; }
+  .rate-bars{ display:flex; gap:4px; align-items:stretch; height:110px; }
+  .rb{ flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:3px; }
+  .rb i{ display:block; width:100%; max-width:26px; border-radius:5px 5px 2px 2px; background:var(--accent); opacity:0.75; }
+  .rb.now i{ opacity:1; }
+  .rb-v{ font-size:9.5px; color:var(--ink); white-space:nowrap; }
+  .rb-l{ font-size:10px; color:var(--ink-soft); font-weight:600; }
+  .rb.now .rb-l{ color:var(--accent); }
   .mk-row{ padding:9px 0; border-top:1px solid var(--line); cursor:pointer; }
   .mk-row:first-of-type{ border-top:none; padding-top:0; }
   .mk-top{ display:flex; justify-content:space-between; align-items:baseline; gap:8px; font-size:13px; }
@@ -3178,10 +3194,12 @@
     return classMode(c) === "online" ? "Mind Stretcher Education" : "Other";
   }
   // Per month of the year: gross, employee CPF, SINDA, take-home, employer CPF and the branches paid.
-  function msCpfMonths(year){
+  // upTo (optional) leaves out classes after that date, e.g. today for "so far".
+  function msCpfMonths(year, upTo){
     var byMonth = {};
     activeClasses().forEach(function(c){
       if (c.org !== "mindstretcher" || !c.income || !c.date || c.date.slice(0,4) !== year) return;
+      if (upTo && c.date > upTo) return;
       var m = byMonth[c.date.slice(0,7)] = byMonth[c.date.slice(0,7)] || {};
       m[msBranch(c)] = (m[msBranch(c)] || 0) + c.income;
     });
@@ -3229,6 +3247,49 @@
     '</div>';
     document.body.appendChild(overlay);
     overlay.addEventListener("click", function(e){ if (e.target === overlay || e.target.closest("[data-close]")) overlay.remove(); });
+  }
+
+  // Dashboard card: this year's pay so far with and without CPF, and the hourly rate month by month.
+  // CPF only applies to Mind Stretcher; other centres pay without deductions.
+  function payCardHtml(){
+    var today = todayStr(), year = today.slice(0,4);
+    var gross = 0;
+    incomeItems().forEach(function(c){
+      if (c.date && c.date.slice(0,4) === year && c.date <= today && !c.pending) gross += c.income || 0;
+    });
+    var employee = 0, sinda = 0, employer = 0;
+    msCpfMonths(year, today).forEach(function(m){ employee += m.employee; sinda += m.sinda; employer += m.employer; });
+    var byMonth = {}, hours = 0, pay = 0;
+    activeClasses().forEach(function(c){
+      var h = Number(c.durationHours) || 0;
+      if (!c.date || h <= 0 || c.date.slice(0,4) !== year || c.date > today) return;
+      var r = byMonth[c.date.slice(0,7)] = byMonth[c.date.slice(0,7)] || { hours:0, pay:0 };
+      r.hours += h; r.pay += c.income || 0; hours += h; pay += c.income || 0;
+    });
+    var thisMonth = today.slice(0,7), cols = [];
+    for (var ym = year+"-01"; ym <= thisMonth; ym = shiftMonth(ym, 1)){
+      var r = byMonth[ym];
+      cols.push({ ym:ym, rate: r && r.hours ? r.pay / r.hours : 0 });
+    }
+    var max = Math.max.apply(null, cols.map(function(c){ return c.rate; }).concat([1]));
+    var tile = function(label, amount, sub, main){
+      return '<div class="pay-tile'+(main?' main':'')+'"><span class="pt-k">'+label+'</span><span class="pt-v mono">'+fmtWhole(amount)+'</span><span class="pt-sub">'+sub+'</span></div>';
+    };
+    return '<div class="card pay-card">'+
+      '<h2 style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">Your pay · '+year+' so far'+
+        '<button class="link-btn" id="payCpfLink" style="font-size:11.5px;white-space:nowrap;">CPF details ›</button></h2>'+
+      '<div class="pay-grid">'+
+        tile("Take-home", gross - employee - sinda, "after your CPF −"+fmtWhole(employee)+" &amp; SINDA −"+fmtWhole(sinda), true)+
+        tile("Gross pay", gross, "what centres pay you")+
+        tile("With employer CPF", gross + employer, "+"+fmtWhole(employer)+" into your CPF")+
+      '</div>'+
+      '<div class="pay-rate-head"><span>Hourly rate by month</span><span class="mono">avg '+(hours ? fmtMoney(pay / hours) : "—")+'/h</span></div>'+
+      '<div class="rate-bars">'+cols.map(function(c){
+        var label = new Date(c.ym+"-01T00:00:00").toLocaleDateString("en-SG",{month:"short"});
+        return '<div class="rb'+(c.ym===thisMonth?' now':'')+'"><span class="rb-v mono">'+(c.rate ? "$"+Math.round(c.rate) : "")+'</span>'+
+          '<i style="height:'+(c.rate ? Math.max(4, c.rate / max * 70) : 0)+'%"></i><span class="rb-l">'+label+'</span></div>';
+      }).join("")+'</div>'+
+    '</div>';
   }
 
   // Best month, average month and average hourly rate across a calendar year.
@@ -3502,6 +3563,7 @@
         clashAlertHtml()+
         reliefAlertHtml()+
         '<div class="period-scroller">'+cardsHtml+'</div>'+
+        payCardHtml()+
         markingCardHtml()+
         comingUpHtml()+
       '</div>'+
@@ -3590,6 +3652,8 @@
     }
     if (bdPrev) bdPrev.addEventListener("click", function(){ shiftBreakdown(-1); });
     if (bdNext) bdNext.addEventListener("click", function(){ shiftBreakdown(1); });
+    var payCpfLink = document.getElementById("payCpfLink");
+    if (payCpfLink) payCpfLink.addEventListener("click", function(){ openCpf(todayStr().slice(0,4)); });
     var cpfLink = document.getElementById("cpfLink");
     if (cpfLink) cpfLink.addEventListener("click", function(){ openCpf(breakdownYear); });
     var setGoalLink = document.getElementById("setGoalLink");
