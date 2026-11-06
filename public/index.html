@@ -3162,17 +3162,28 @@
     var best = months.reduce(function(a, b){ return b.totals.earned > a.totals.earned ? b : a; });
     var total = months.reduce(function(sum, m){ return sum + m.totals.earned; }, 0);
     var today = todayStr();
-    var hours = 0, income = 0;
+    // Teaching only: entries without hours (internship pay, marking) are left out.
+    var hours = 0, income = 0, msHours = 0, msIncome = 0, firstDate = null;
     activeClasses().forEach(function(c){
       if (!c.date || c.date.slice(0,4) !== year || c.date > today) return;
       var h = Number(c.durationHours) || 0;
-      if (h > 0){ hours += h; income += c.income || 0; }
+      if (h <= 0) return;
+      hours += h; income += c.income || 0;
+      if (c.org === "mindstretcher"){ msHours += h; msIncome += c.income || 0; }
+      if (!firstDate || c.date < firstDate) firstDate = c.date;
     });
+    // Averaged over the time since the year's first class, up to today (or the year's end).
+    var spanEnd = today < year+"-12-31" ? today : year+"-12-31";
+    var days = firstDate ? Math.round((new Date(spanEnd+"T00:00:00") - new Date(firstDate+"T00:00:00")) / 86400000) + 1 : 0;
+    var fmtH = function(h){ return (Math.round(h*10)/10)+" h"; };
     var stats = [
       ["Best month", fmtWhole(best.totals.earned)+" · "+monthLabelShort(best.ym).replace(/ \d{4}$/, "")],
       ["Avg per month", fmtWhole(total / months.length)],
       ["Avg hourly", hours ? fmtMoney(income / hours)+"/h" : "—"],
-      ["Hours taught", (Math.round(hours*10)/10)+" h"]
+      ["Mind Stretcher hourly", msHours ? fmtMoney(msIncome / msHours)+"/h" : "—"],
+      ["Hours taught", fmtH(hours)],
+      ["Avg hours / month", days ? fmtH(hours / (days / 30.44)) : "—"],
+      ["Avg hours / week", days ? fmtH(hours / (days / 7)) : "—"]
     ];
     return '<div class="year-stats">'+stats.map(function(st){
       return '<div class="ys"><span class="ys-k">'+st[0]+'</span><span class="ys-v mono">'+st[1]+'</span></div>';
@@ -3196,23 +3207,40 @@
     var last = dates.length ? dates[dates.length-1].slice(0,7) : thisMonth;
     if (last < thisMonth) last = thisMonth;
     var months = monthTotalsList(first, last);
-    var earned = 0, projected = 0;
-    months.forEach(function(m){ earned += m.totals.earned; projected += m.totals.projected; });
+    // Totals per calendar year, so booked-ahead classes in later years don't pile onto this one.
+    var years = {};
+    months.forEach(function(m){
+      var y = years[m.ym.slice(0,4)] = years[m.ym.slice(0,4)] || { earned:0, projected:0 };
+      y.earned += m.totals.earned; y.projected += m.totals.projected;
+    });
 
+    // Hourly rate per month from classes taught (entries without hours, like internship pay, are left out).
+    var monthHours = {};
+    activeClasses().forEach(function(c){
+      var h = Number(c.durationHours) || 0;
+      if (!c.date || h <= 0 || c.date > todayStr()) return;
+      var r = monthHours[c.date.slice(0,7)] = monthHours[c.date.slice(0,7)] || { hours:0, pay:0 };
+      r.hours += h; r.pay += c.income || 0;
+    });
     function monthRow(m){
       var parts = m.ym.split("-").map(Number);
+      var mh = monthHours[m.ym];
       var label = new Date(parts[0], parts[1]-1, 1).toLocaleDateString("en-SG",{month:"long", year:"numeric"});
       var t = m.totals;
       return '<button class="ih-row'+(m.ym===thisMonth?" now":"")+'" data-trend="'+m.ym+'">'+
         '<span class="ih-month">'+label+(m.ym===thisMonth?' <span class="tag-badge">now</span>':'')+'</span>'+
-        '<span class="ih-split mono">'+(t.earned ? fmtMoney(t.earned)+' earned' : '')+(t.earned && t.projected ? ' · ' : '')+(t.projected ? fmtMoney(t.projected)+' proj.' : '')+'</span>'+
+        '<span class="ih-split mono">'+(t.earned ? fmtMoney(t.earned)+' earned' : '')+(t.earned && t.projected ? ' · ' : '')+(t.projected ? fmtMoney(t.projected)+' proj.' : '')+
+          (mh && mh.hours ? ' · '+fmtMoney(mh.pay / mh.hours)+'/h' : '')+'</span>'+
         '<span class="ih-total mono">'+fmtMoney(t.combined)+'</span>'+
       '</button>';
     }
-    var pastRows = months.filter(function(m){ return m.ym <= thisMonth; }).reverse().map(monthRow).join("");
-    var futureRows = months.filter(function(m){ return m.ym > thisMonth; }).map(monthRow).join("");
-    var rows = '<div class="ih-section">So far</div>'+pastRows+
-      (futureRows ? '<div class="ih-section">Coming months</div>'+futureRows : '');
+    function yearText(t){
+      return (t.earned ? fmtMoney(t.earned)+' earned' : '')+(t.earned && t.projected ? ' · ' : '')+(t.projected ? fmtMoney(t.projected)+' to come' : '');
+    }
+    var rows = Object.keys(years).sort().reverse().map(function(y){
+      return '<div class="ih-section">'+y+' · '+yearText(years[y])+'</div>'+
+        months.filter(function(m){ return m.ym.slice(0,4) === y; }).reverse().map(monthRow).join("");
+    }).join("");
 
     var overlay = document.createElement("div");
     overlay.id = "incomeOverlay";
@@ -3220,8 +3248,10 @@
     overlay.innerHTML =
       '<div class="modal-card income-modal">'+
         '<div class="modal-head"><h3>Income by month</h3><button class="icon-btn" id="incomeCloseBtn" aria-label="Close">✕</button></div>'+
-        '<div class="ih-summary"><div><span class="dot earned"></span> Earned so far <b class="mono">'+fmtMoney(earned)+'</b></div>'+
-          '<div><span class="dot projected"></span> Still to come <b class="mono">'+fmtMoney(projected)+'</b></div>'+
+        '<div class="ih-summary">'+Object.keys(years).sort().map(function(y){
+            return '<div>'+y+' <b class="mono">'+fmtMoney(years[y].earned + years[y].projected)+'</b>'+
+              (years[y].projected ? ' <span class="mono">('+fmtMoney(years[y].projected)+' to come)</span>' : '')+'</div>';
+          }).join("")+
           (monthlyGoal > 0 ? '<div><span class="goal-key-inline"></span> Goal <b class="mono">'+fmtWhole(monthlyGoal)+'</b>/month</div>' : '')+'</div>'+
         '<div class="ih-chart"><div class="trend" style="min-width:'+(months.length*46)+'px;height:170px;">'+trendColsHtml(months)+'</div></div>'+
         '<div class="ih-hint">Tap a month to see its breakdown.</div>'+
