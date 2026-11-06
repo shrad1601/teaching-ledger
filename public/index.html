@@ -772,6 +772,7 @@
   .ih-hint{ font-size:11px; color:var(--ink-soft); margin:8px 0 6px; }
   .ih-list{ display:flex; flex-direction:column; }
   .ih-row{ display:flex; align-items:baseline; gap:10px; padding:10px 2px; border:none; border-top:1px solid var(--line); background:transparent; color:var(--ink); cursor:pointer; text-align:left; font:inherit; }
+  .cpf-sub{ display:block; font-size:10.5px; color:var(--ink-soft); font-weight:500; margin-top:2px; white-space:normal; }
   .ih-section{ font-size:10.5px; text-transform:uppercase; letter-spacing:0.12em; font-weight:700; color:var(--ink-soft); margin:12px 0 2px; }
   .ih-section + .ih-row{ border-top:none; }
   .ih-row.now .ih-month{ color:var(--accent); }
@@ -3154,6 +3155,82 @@
     overlay.addEventListener("click", function(e){ if (e.target === overlay || e.target.closest("[data-close]")) overlay.remove(); });
   }
 
+  // ---------------- Mind Stretcher CPF ----------------
+  // Every MS branch is its own employer with its own payslip, so CPF and SINDA are worked out per
+  // branch per month (checked against the West Campus May 2026 payslip). Rates for employees under 55:
+  // nothing at or below $50; employer 17% only up to $500; employee 0.6 x (wage - 500) up to $750,
+  // then 20%. The total is rounded to the nearest dollar and the employee share rounded down.
+  function cpfFor(wage){
+    if (wage <= 50) return { employee:0, employer:0 };
+    var employee = wage <= 500 ? 0 : wage <= 750 ? 0.6 * (wage - 500) : 0.2 * wage;
+    var total = Math.round(0.17 * wage + employee);
+    employee = Math.floor(employee);
+    return { employee:employee, employer:total - employee };
+  }
+  function sindaFor(wage){
+    var bands = [[1000,1],[1500,3],[2500,5],[4500,7],[7500,9],[10000,12],[15000,18]];
+    if (wage <= 0) return 0;
+    for (var i = 0; i < bands.length; i++) if (wage <= bands[i][0]) return bands[i][1];
+    return 30;
+  }
+  function msBranch(c){
+    if (c.place) return c.place;
+    return classMode(c) === "online" ? "Mind Stretcher Education" : "Other";
+  }
+  // Per month of the year: gross, employee CPF, SINDA, take-home, employer CPF and the branches paid.
+  function msCpfMonths(year){
+    var byMonth = {};
+    activeClasses().forEach(function(c){
+      if (c.org !== "mindstretcher" || !c.income || !c.date || c.date.slice(0,4) !== year) return;
+      var m = byMonth[c.date.slice(0,7)] = byMonth[c.date.slice(0,7)] || {};
+      m[msBranch(c)] = (m[msBranch(c)] || 0) + c.income;
+    });
+    return Object.keys(byMonth).sort().map(function(ym){
+      var r = { ym:ym, gross:0, employee:0, sinda:0, employer:0, branches:0, over:[] };
+      Object.keys(byMonth[ym]).forEach(function(b){
+        var w = Math.round(byMonth[ym][b] * 100) / 100, k = cpfFor(w);
+        r.gross += w; r.employee += k.employee; r.employer += k.employer; r.sinda += sindaFor(w); r.branches++;
+        if (w > 500) r.over.push(b);
+      });
+      r.net = r.gross - r.employee - r.sinda;
+      return r;
+    });
+  }
+  function openCpf(year){
+    var months = msCpfMonths(year);
+    var thisMonth = todayStr().slice(0,7);
+    var t = { gross:0, employee:0, sinda:0, employer:0, net:0 };
+    months.forEach(function(m){ ["gross","employee","sinda","employer","net"].forEach(function(k){ t[k] += m[k]; }); });
+    var line = function(m){
+      return 'Gross '+fmtMoney(m.gross)+' · CPF −'+fmtMoney(m.employee)+' · SINDA −'+fmtMoney(m.sinda)+' · employer CPF +'+fmtMoney(m.employer);
+    };
+    var rows = months.slice().reverse().map(function(m){
+      return '<div class="ih-row" style="cursor:default;">'+
+        '<span class="ih-month">'+monthLabelShort(m.ym)+(m.ym >= thisMonth ? ' <span class="tag-badge">so far</span>' : '')+
+          '<span class="cpf-sub mono">'+line(m)+'</span>'+
+          '<span class="cpf-sub">'+m.branches+' branch'+(m.branches===1?'':'es')+(m.over.length ? ' · over $500: '+m.over.map(escapeHtml).join(", ") : '')+'</span></span>'+
+        '<span class="ih-total mono">'+fmtMoney(m.net)+'</span>'+
+      '</div>';
+    }).join("") || '<div class="empty-note">No Mind Stretcher classes this year.</div>';
+    var overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = '<div class="modal-card income-modal">'+
+      '<div class="modal-head"><h3>Mind Stretcher CPF · '+year+'</h3><button class="icon-btn" data-close aria-label="Close">✕</button></div>'+
+      '<div class="year-stats">'+[
+        ["Gross pay", fmtMoney(t.gross)],
+        ["Your CPF", "−"+fmtMoney(t.employee)],
+        ["SINDA", "−"+fmtMoney(t.sinda)],
+        ["Take-home", fmtMoney(t.net)],
+        ["Employer CPF", "+"+fmtMoney(t.employer)],
+        ["Total package", fmtMoney(t.gross + t.employer)]
+      ].map(function(st){ return '<div class="ys"><span class="ys-k">'+st[0]+'</span><span class="ys-v mono">'+st[1]+'</span></div>'; }).join("")+'</div>'+
+      '<div class="ih-hint" style="margin-bottom:8px;">Each branch is a separate employer, so CPF is worked out per branch: under $500 a month you pay none (the employer still adds 17%), and each branch payslip takes $1 SINDA. Take-home is shown on the right.</div>'+
+      '<div class="ih-list">'+rows+'</div>'+
+    '</div>';
+    document.body.appendChild(overlay);
+    overlay.addEventListener("click", function(e){ if (e.target === overlay || e.target.closest("[data-close]")) overlay.remove(); });
+  }
+
   // Best month, average month and average hourly rate across a calendar year.
   // Only counts classes already taught, so booked-ahead months don't inflate the stats.
   function yearStatsHtml(year){
@@ -3387,7 +3464,8 @@
           '<button class="icon-btn" id="bdNext" aria-label="Next year">›</button>'+
         '</div>'+
         '<div class="cal-summary">Total <span class="mono">'+fmtMoney(yTotals.combined)+'</span> — '+fmtMoney(yTotals.earned)+' earned · '+fmtMoney(yTotals.projected)+' projected</div>'+
-        yearStatsHtml(breakdownYear);
+        yearStatsHtml(breakdownYear)+
+        '<button class="owed-footer" id="cpfLink" style="margin:0 0 12px;"><span>Mind Stretcher CPF &amp; take-home</span><span>›</span></button>';
     }
     var rowsHtml = incomeOrgKeys().map(function(org){
       var v = bd[org] || {earned:0, projected:0};
@@ -3512,6 +3590,8 @@
     }
     if (bdPrev) bdPrev.addEventListener("click", function(){ shiftBreakdown(-1); });
     if (bdNext) bdNext.addEventListener("click", function(){ shiftBreakdown(1); });
+    var cpfLink = document.getElementById("cpfLink");
+    if (cpfLink) cpfLink.addEventListener("click", function(){ openCpf(breakdownYear); });
     var setGoalLink = document.getElementById("setGoalLink");
     if (setGoalLink) setGoalLink.addEventListener("click", function(e){ e.stopPropagation(); setTab("settings"); });
   }
