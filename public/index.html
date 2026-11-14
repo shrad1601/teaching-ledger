@@ -657,6 +657,11 @@
   .cc-name{ flex:1; min-width:0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .cc-sub{ color:var(--ink-soft); font-weight:500; }
   .cc-time{ font-size:11.5px; color:var(--ink-soft); white-space:nowrap; }
+  .cal-chip.faded{ opacity:0.35; text-decoration:line-through; }
+  .class-item.faded{ opacity:0.5; }
+  .class-item.faded .income{ text-decoration:line-through; }
+  .cc-drop{ font-size:10.5px; font-weight:700; color:var(--danger); }
+  .cc-pick{ font-size:11px; color:var(--ink-soft); margin-top:8px; }
   .cc-actions{ display:flex; gap:8px; margin-top:8px; }
   .cc-btn{
     flex:1; border:1px solid var(--line); background:var(--surface-solid); color:var(--ink);
@@ -1317,7 +1322,17 @@
   // Classes inside a leave period are hidden at read time rather than deleted, so syncs and
   // repeating classes can't bring them back, and removing the leave restores them.
   function liveClasses(){ return classes.filter(function(c){ return !c.deletedAt; }); }
-  function activeClasses(){ return liveClasses().filter(function(c){ return !leaveForClass(c); }); }
+  // Classes on a not-working trip, and ones marked "not taking" (e.g. the loser of a clash), don't count.
+  function activeClasses(){ return liveClasses().filter(function(c){ return !leaveForClass(c) && !c.dropped; }); }
+  // Clashes still include "not taking" classes: relief has to be found until the clash is dismissed.
+  function scheduledClasses(){ return liveClasses().filter(function(c){ return !leaveForClass(c); }); }
+  async function setDropped(c, dropped){
+    if (!db) return;
+    try{
+      await db.collection("classes").doc(c.id).update({ dropped: dropped });
+      showToast(orgMeta(c.org).label+" "+fmtDate(c.date)+(dropped ? " marked not taking" : " back in your income"), false);
+    }catch(e){ console.error(e); showToast("Couldn't save — try again", false); }
+  }
 
   // ---------------- BestMinds marking ----------------
   // Scripts come in batches, each with a due date, and are paid per script. The rate depends on the
@@ -2795,7 +2810,7 @@
   function clashesWith(fields, ignoreId){
     var span = classSpan(fields);
     if (!span) return [];
-    return activeClasses().filter(function(c){
+    return scheduledClasses().filter(function(c){
       if (c.id === ignoreId || c.date !== fields.date) return false;
       var other = classSpan(c);
       return other && spansOverlap(span, other);
@@ -2823,7 +2838,7 @@
   function upcomingClashes(){
     var today = todayStr();
     var byDate = {};
-    activeClasses().forEach(function(c){
+    scheduledClasses().forEach(function(c){
       if (c.date < today || !classSpan(c)) return;
       (byDate[c.date] = byDate[c.date] || []).push(c);
     });
@@ -2870,12 +2885,19 @@
     var classRow = function(c){
       var meta = orgMeta(c.org), label = classTypeLabel(c);
       return '<div class="cc-class"><span class="dot" style="background:'+meta.color+'"></span>'+
-        '<span class="cc-name">'+meta.label+(label ? ' <span class="cc-sub">· '+label+'</span>' : '')+'</span>'+
+        '<span class="cc-name">'+meta.label+(label ? ' <span class="cc-sub">· '+label+'</span>' : '')+
+          (c.dropped ? ' <span class="cc-drop">not taking · needs relief</span>' : '')+'</span>'+
         '<span class="cc-time mono">'+classTimeRange(c)+'</span></div>';
     };
     return '<div class="clash-item" data-clashidx="'+i+'">'+
       '<div class="cc-head"><span class="cc-day">'+day+'</span><span class="cc-overlap">'+overlapText+'</span></div>'+
       classRow(p[0])+classRow(p[1])+
+      '<div class="cc-pick">Not taking one? Pick it to leave it out of your income. The clash stays here until you dismiss it, so you can sort out relief.</div>'+
+      '<div class="cc-actions">'+
+        [p[0], p[1]].map(function(c){
+          return '<button class="cc-btn" data-clashdrop="'+c.id+'">'+(c.dropped ? 'Taking ' : 'Not taking ')+escapeHtml(orgMeta(c.org).label)+(c.dropped ? ' after all' : '')+'</button>';
+        }).join("")+
+      '</div>'+
       '<div class="cc-actions">'+
         '<button class="cc-btn" data-clashweek="'+p[0].date+'">See week</button>'+
         '<button class="cc-btn dismiss" data-clashdismiss="'+i+'">Dismiss</button>'+
@@ -2909,6 +2931,17 @@
         historyView = "week";
         historyWeek = mondayOf(btn.getAttribute("data-clashweek"));
         setTab("history");
+      });
+    });
+    overlay.querySelectorAll("[data-clashdrop]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        // The clash stays listed (relief is still needed) until it's dismissed; just redraw it.
+        var c = classes.find(function(x){ return x.id === btn.getAttribute("data-clashdrop"); });
+        if (!c) return;
+        c.dropped = !c.dropped;
+        setDropped(c, c.dropped);
+        close();
+        openClashList();
       });
     });
     overlay.querySelectorAll("[data-clashdismiss]").forEach(function(btn){
@@ -4049,7 +4082,7 @@
     var totals = periodTotals([historyWeek, weekEnd], historyOrgFilter);
     var hours = inWeek.reduce(function(sum, c){ return sum + (Number(c.durationHours) || 0); }, 0);
     var skippedInWeek = liveClasses().filter(function(c){
-      return c.date >= historyWeek && c.date <= weekEnd && (historyOrgFilter==="all" || c.org===historyOrgFilter) && leaveForClass(c);
+      return c.date >= historyWeek && c.date <= weekEnd && (historyOrgFilter==="all" || c.org===historyOrgFilter) && (leaveForClass(c) || c.dropped);
     });
     var clashIds = {};
     inWeek.forEach(function(c){
@@ -4083,12 +4116,13 @@
         var h = Number(c.durationHours) || 0;
         var onLeave = skippedList.indexOf(c) !== -1;
         var cls = "wk-class"+(onLeave ? " is-leave" : clashIds[c.id] ? " is-clash" : "");
-        var title = onLeave ? ' title="Skipped — overseas, not working"' : clashIds[c.id] ? ' title="Overlaps another class"' : '';
+        var title = onLeave ? (c.dropped ? ' title="Not taking this class"' : ' title="Skipped — overseas, not working"') : clashIds[c.id] ? ' title="Overlaps another class"' : '';
         return '<button class="'+cls+'" data-wkclass="'+c.id+'"'+title+'>'+
           '<span class="wk-time mono">'+(clashIds[c.id] && !onLeave ?'⚠ ':'')+(formatTime12h(c.startTime) || "—")+'</span>'+
           '<span class="wk-what"><span class="dot" style="background:'+meta.color+'"></span>'+meta.label+(label ? ' <span class="wk-sub">· '+label+'</span>' : '')+'</span>'+
           (onLeave
-            ? (reliefSecured(leaveForClass(c), c) ? '<span class="wk-relief ok">relief ✓</span>' : '<span class="wk-relief missing">no relief</span>')
+            ? (c.dropped ? '<span class="wk-relief">not taking</span>'
+              : reliefSecured(leaveForClass(c), c) ? '<span class="wk-relief ok">relief ✓</span>' : '<span class="wk-relief missing">no relief</span>')
             : '<span class="wk-dur mono">'+(h ? (Math.round(h*100)/100)+'h' : '')+'</span>')+
           '<span class="wk-amt mono '+(c.date > today ? "future" : "past")+'">'+fmtMoney(c.income || 0)+'</span>'+
         '</button>';
@@ -4121,7 +4155,7 @@
     var today = todayStr();
 
     var byDate = {};
-    activeClasses().forEach(function(c){
+    scheduledClasses().forEach(function(c){ // "not taking" classes show faded
       if (historyOrgFilter!=="all" && c.org!==historyOrgFilter) return;
       if (!byDate[c.date]) byDate[c.date] = [];
       byDate[c.date].push(c);
@@ -4136,7 +4170,7 @@
         var dayList = byDate[dateStr] || [];
         var chips = dayList.slice(0,3).map(function(c){
           var meta = orgMeta(c.org);
-          return '<span class="cal-chip" data-detailchip="'+c.id+'" style="background:'+meta.color+'">'+formatTime12h(c.startTime)+'</span>';
+          return '<span class="cal-chip'+(c.dropped ? ' faded' : '')+'" data-detailchip="'+c.id+'" style="background:'+meta.color+'"'+(c.dropped ? ' title="Not taking"' : '')+'>'+formatTime12h(c.startTime)+'</span>';
         }).join("");
         var more = dayList.length>3 ? '<span class="cal-chip-more">+'+(dayList.length-3)+' more</span>' : "";
         var cls = "cal-cell" + (dateStr===today?" is-today":"") + (dateStr===calendarSelected?" is-selected":"") + (leavesOn(dateStr).length?" on-leave":"");
@@ -4150,7 +4184,7 @@
 
     var panelHtml = "";
     if (calendarSelected && calendarSelected.slice(0,7)===calendarMonth){
-      var dayClasses = activeClasses().filter(function(c){
+      var dayClasses = scheduledClasses().filter(function(c){
         return c.date===calendarSelected && (historyOrgFilter==="all"||c.org===historyOrgFilter);
       });
       panelHtml = '<div class="cal-daypanel"><div class="cal-dayhead"><h3 class="display">'+fmtDate(calendarSelected)+'</h3>'+
@@ -4182,8 +4216,9 @@
     if (whereLabel(c) && (c.place || classMode(c) !== defaultMode(c.org))) subBits.push(whereLabel(c)); // "Online" for Ottodot is a given
     if (c.studentCount) subBits.push(c.studentCount + " students");
     if (c.startTime) subBits.push(formatTime12h(c.startTime));
+    if (c.dropped) subBits.push("not taking");
     var seriesBtn = c.seriesId ? '<button class="icon-btn" title="Stop repeating" data-stop="'+c.seriesId+'">⟲</button>' : "";
-    return '<div class="class-item" data-detail="'+c.id+'">'+
+    return '<div class="class-item'+(c.dropped ? ' faded' : '')+'" data-detail="'+c.id+'">'+
       '<div class="left">'+
         '<div class="top-line"><span class="dot" style="background:'+meta.color+'"></span>'+meta.label+
           (c.source && c.source.indexOf("synced")===0 ? '<span class="tag-badge">synced</span>' : (c.seriesId?'<span class="tag-badge">weekly</span>':''))+
@@ -4553,6 +4588,8 @@
           '<button class="icon-btn" id="detailCloseBtn" aria-label="Close">✕</button>'+
         '</div>'+
         rowsHtml+
+        (c.dropped ? '<div class="ih-hint" style="margin:8px 0 0;">Marked <b>not taking</b>, so it\'s left out of your income.</div>' : '')+
+        '<button class="copy-open-btn" id="detailDropBtn">'+(c.dropped ? '↺ I\'m taking this class after all' : '⊘ Not taking this class')+'</button>'+
         '<button class="copy-open-btn" id="detailCopyBtn">⧉ Copy to other dates</button>'+
         '<div class="modal-actions"><button class="icon-btn" id="detailEditBtn">Edit</button><button class="icon-btn danger" id="detailDeleteBtn">Delete class</button></div>'+
       '</div>';
@@ -4565,6 +4602,10 @@
       copyDates = {};
       copyMonth = c.date.slice(0,7);
       renderDetailModal();
+    });
+    document.getElementById("detailDropBtn").addEventListener("click", function(){
+      setDropped(c, !c.dropped);
+      closeDetail();
     });
     document.getElementById("detailDeleteBtn").addEventListener("click", function(){
       softDelete(c.id);
