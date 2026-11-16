@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mind Stretcher -> Teaching Ledger Sync
 // @namespace    shraddha-teaching-ledger
-// @version      1.9
+// @version      2.0
 // @description  Reads your Dash schedule + attendance and writes classes straight into your Teaching Ledger (Firestore). No copy-paste.
 // @match        https://dash.mindstretcher.com/teacher/my-schedule/*
 // @grant        GM_getValue
@@ -275,6 +275,7 @@
         income: numField(fields, "income"),
         durationHours: numField(fields, "durationHours"),
         studentCount: numField(fields, "studentCount"),
+        hmu: !!(fields.hmu && fields.hmu.booleanValue),
         deletedAt: numField(fields, "deletedAt")
       });
     });
@@ -477,7 +478,10 @@
             }
             if (att.total === null) { skippedNoAttendance++; continue; }
             var billableSize = Math.max(0, att.total - att.makeupCount);
-            var allMakeup = billableSize === 0 && att.makeupCount > 0;
+            // Holiday makeup classes have no badge on Dash, so they're also recognised by "HMU" in the
+            // name or by being marked HMU in the ledger (that mark is never overwritten here).
+            var prior = existingByDocId["mindstretcher_" + s.sessionId];
+            var allMakeup = (billableSize === 0 && att.makeupCount > 0) || /\bHMU\b/i.test(s.title) || !!(prior && prior.hmu);
             var weekend = s.weekday === "Sat" || s.weekday === "Sun";
             var rate = allMakeup ? MAKEUP_SESSION_RATES[level] / 2 : rateFor(level, weekend, billableSize);
             var income = Math.round(rate * s.durationHours * 100) / 100;

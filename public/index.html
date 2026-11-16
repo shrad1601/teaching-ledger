@@ -4217,6 +4217,7 @@
     if (c.studentCount) subBits.push(c.studentCount + " students");
     if (c.startTime) subBits.push(formatTime12h(c.startTime));
     if (c.dropped) subBits.push("not taking");
+    if (c.makeup) subBits.push("HMU");
     var seriesBtn = c.seriesId ? '<button class="icon-btn" title="Stop repeating" data-stop="'+c.seriesId+'">⟲</button>' : "";
     return '<div class="class-item'+(c.dropped ? ' faded' : '')+'" data-detail="'+c.id+'">'+
       '<div class="left">'+
