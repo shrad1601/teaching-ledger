@@ -4119,7 +4119,7 @@
         var title = onLeave ? (c.dropped ? ' title="Not taking this class"' : ' title="Skipped — overseas, not working"') : clashIds[c.id] ? ' title="Overlaps another class"' : '';
         return '<button class="'+cls+'" data-wkclass="'+c.id+'"'+title+'>'+
           '<span class="wk-time mono">'+(clashIds[c.id] && !onLeave ?'⚠ ':'')+(formatTime12h(c.startTime) || "—")+'</span>'+
-          '<span class="wk-what"><span class="dot" style="background:'+meta.color+'"></span>'+meta.label+(label ? ' <span class="wk-sub">· '+label+'</span>' : '')+'</span>'+
+          '<span class="wk-what"><span class="dot" style="background:'+meta.color+'"></span>'+meta.label+(label ? ' <span class="wk-sub">· '+label+'</span>' : '')+(c.makeup ? ' <span class="wk-sub">· HMU</span>' : '')+'</span>'+
           (onLeave
             ? (c.dropped ? '<span class="wk-relief">not taking</span>'
               : reliefSecured(leaveForClass(c), c) ? '<span class="wk-relief ok">relief ✓</span>' : '<span class="wk-relief missing">no relief</span>')
@@ -4254,6 +4254,7 @@
     rows.push(["Where", where ? (classMode(c)==="physical" && c.place ? "Physical · "+c.place : where) : "Not set"]);
     if (c.category) rows.push(["Category", PRIMEPLUS_LABELS[c.category] || c.category]);
     if (c.studentCount != null) rows.push(["Students", c.studentCount]);
+    if (c.makeup) rows.push(["Type", "Holiday makeup (HMU)"]);
     if (c.weekdayOrWeekend) rows.push(["Day type", c.weekdayOrWeekend]);
     rows.push(["Hourly rate", c.rate != null ? fmtMoney(c.rate) + "/hr" : "—"]);
     rows.push(["Income", fmtMoney(c.income)]);
